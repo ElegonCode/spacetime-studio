@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "paths": {
+      "#build/ui": ["./node_modules/.nuxt-ui/ui"],
+    },
+    "composite": true,
+    "skipLibCheck": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+  },
+  "include": ["vite.config.ts"],
+}
