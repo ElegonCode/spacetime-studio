@@ -23,14 +23,24 @@ const testing = ref(false);
 const error = ref("");
 const status = ref("");
 const editorOpen = ref(false);
+const MAINCLOUD_URL = "https://maincloud.spacetimedb.com";
+const LOCALHOST_URL = "http://localhost:3000";
+
+const hostModeOptions = [
+  { label: "Hosted in Maincloud", value: "maincloud" },
+  { label: "Custom", value: "custom" },
+];
+
+type HostMode = "maincloud" | "custom";
 
 const form = ref({
   id: "",
   name: "Localhost",
-  baseUrl: "http://localhost:3000",
+  baseUrl: LOCALHOST_URL,
   database: "",
   token: "",
 });
+const hostMode = ref<HostMode>("custom");
 
 const selectedConnection = computed(
   () => connections.value.find((connection) => connection.id === selectedId.value) ?? null,
@@ -43,14 +53,19 @@ const connectionOptions = computed(() =>
   })),
 );
 
+const selectedBaseUrl = computed(() =>
+  hostMode.value === "maincloud" ? MAINCLOUD_URL : form.value.baseUrl,
+);
+
 function resetForm() {
   form.value = {
     id: "",
     name: "Localhost",
-    baseUrl: "http://localhost:3000",
+    baseUrl: LOCALHOST_URL,
     database: "",
     token: "",
   };
+  hostMode.value = "custom";
 }
 
 async function load() {
@@ -90,6 +105,7 @@ function editSelected() {
     database: connection.database,
     token: "",
   };
+  hostMode.value = connection.baseUrl === MAINCLOUD_URL ? "maincloud" : "custom";
   error.value = "";
   status.value = "";
   editorOpen.value = true;
@@ -111,7 +127,7 @@ async function save() {
     const connection = await saveConnection({
       id: form.value.id || undefined,
       name: form.value.name,
-      baseUrl: form.value.baseUrl,
+      baseUrl: selectedBaseUrl.value,
       database: form.value.database,
       token: form.value.token || undefined,
     });
@@ -137,7 +153,7 @@ async function test() {
   try {
     const result = await testConnection({
       id: form.value.id || undefined,
-      baseUrl: form.value.baseUrl,
+      baseUrl: selectedBaseUrl.value,
       database: form.value.database,
       token: form.value.token || undefined,
     });
@@ -244,8 +260,14 @@ onUnmounted(() => {
           <UFormField label="Database name or identity">
             <UInput v-model="form.database" class="w-full" placeholder="my-database" />
           </UFormField>
-          <UFormField label="Host URL">
-            <UInput v-model="form.baseUrl" class="w-full" placeholder="http://localhost:3000" />
+          <UFormField label="Host">
+            <USelect v-model="hostMode" :items="hostModeOptions" class="w-full" />
+          </UFormField>
+          <UFormField v-if="hostMode === 'custom'" label="Custom host URL">
+            <UInput v-model="form.baseUrl" class="w-full" :placeholder="LOCALHOST_URL" />
+          </UFormField>
+          <UFormField v-else label="Host URL">
+            <UInput :model-value="MAINCLOUD_URL" class="w-full" disabled />
           </UFormField>
           <UFormField label="Bearer token">
             <UInput

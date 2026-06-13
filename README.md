@@ -1,3 +1,5 @@
+![Spacetime Studio banner](https://raw.githubusercontent.com/ElegonCode/spacetime-studio/main/public/screenshot.png)
+
 # Spacetime Studio
 
 Spacetime Studio is a desktop admin client for [SpacetimeDB](https://spacetimedb.com/). It gives you a lightweight way to connect to a local or hosted SpacetimeDB instance, inspect schemas, browse and edit table data, run raw SQL, view reducers/functions, and tail database logs.
