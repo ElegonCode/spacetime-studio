@@ -4,7 +4,7 @@
 
 Spacetime Studio is a desktop admin client for [SpacetimeDB](https://spacetimedb.com/). It gives you a lightweight way to connect to a local or hosted SpacetimeDB instance, inspect schemas, browse and edit table data, run raw SQL, view reducers/functions, and tail database logs.
 
-The project is currently source-first. Packaged releases are planned, but for now you build and run the app locally.
+Windows builds are available from the GitHub Releases page. macOS and Linux builds are planned for a future release; for now, those platforms can build and run the app from source.
 
 ## What You Can Do
 
@@ -30,25 +30,23 @@ The project is currently source-first. Packaged releases are planned, but for no
 
 There are two intended ways to use Spacetime Studio:
 
-- **Download a release** for the easiest setup. This is coming soon.
-- **Build from source** if you want to use the app today or contribute to development.
+- **Download a release** for the easiest Windows setup.
+- **Build from source** if you are on macOS or Linux, want the latest development version, or want to contribute.
 
 ### Option 1: Download A Release
 
-Coming soon.
-
-Once packaged releases are available, you will be able to:
+Windows installers are available from the repository's GitHub Releases page.
 
 1. Open the repository's GitHub Releases page.
-2. Download the installer or app bundle for your operating system.
-3. Install or unzip Spacetime Studio.
+2. Download the Windows installer from the latest release.
+3. Install Spacetime Studio.
 4. Launch the app and connect to your SpacetimeDB database.
 
-This path will not require Node.js, Rust, or compiling the project yourself.
+This path does not require Node.js, Rust, or compiling the project yourself. macOS and Linux release downloads will be added in a future release.
 
 ### Option 2: Build From Source
 
-Use this path if you want to run Spacetime Studio today.
+Use this path if you want to run Spacetime Studio on macOS or Linux, use the latest development version, or contribute to the project.
 
 #### Prerequisites
 
