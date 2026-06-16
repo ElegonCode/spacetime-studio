@@ -56,6 +56,10 @@ export type SqlResult = {
   results: unknown;
 };
 
+export type FunctionRunResult = {
+  results: unknown;
+};
+
 const SELECTED_CONNECTION_KEY = "spacetime-studio:selected-connection";
 
 export function getSelectedConnectionId() {
@@ -106,17 +110,31 @@ export function queryTable(
   tableName: string,
   page: number,
   pageSize: number,
+  where?: string,
 ) {
   return invoke<TablePage>("query_table", {
     connectionId,
     tableName,
     page,
     pageSize,
+    whereClause: where,
   });
 }
 
 export function executeSql(connectionId: string, sql: string) {
   return invoke<SqlResult>("execute_sql", { connectionId, sql });
+}
+
+export function runFunction(
+  connectionId: string,
+  functionName: string,
+  args: unknown[],
+) {
+  return invoke<FunctionRunResult>("run_function", {
+    connectionId,
+    functionName,
+    args,
+  });
 }
 
 export function createRow(

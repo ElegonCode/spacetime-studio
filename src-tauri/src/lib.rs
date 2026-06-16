@@ -21,6 +21,7 @@ pub fn run() {
             spacetime::get_schema,
             spacetime::query_table,
             spacetime::execute_sql,
+            spacetime::run_function,
             spacetime::create_row,
             spacetime::update_row,
             spacetime::delete_row,

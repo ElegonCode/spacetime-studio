@@ -175,6 +175,33 @@ fn quote_ident(identifier: &str) -> String {
     format!("\"{}\"", identifier.replace('"', "\"\""))
 }
 
+fn normalize_where_clause(where_clause: Option<&str>) -> Result<String, String> {
+    let Some(where_clause) = where_clause
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(String::new());
+    };
+
+    if where_clause.contains(';') {
+        return Err("WHERE query cannot contain semicolons.".into());
+    }
+
+    let lowercase_where = where_clause.to_ascii_lowercase();
+    if lowercase_where == "where" {
+        Ok(String::new())
+    } else if lowercase_where.starts_with("where ")
+        || lowercase_where.starts_with("where\t")
+        || lowercase_where.starts_with("where\r")
+        || lowercase_where.starts_with("where\n")
+    {
+        let condition = where_clause[5..].trim_start();
+        Ok(format!(" WHERE {condition}"))
+    } else {
+        Ok(format!(" WHERE {where_clause}"))
+    }
+}
+
 fn sql_literal(value: &Value) -> Result<String, String> {
     match value {
         Value::Null => {
@@ -273,6 +300,43 @@ async fn post_sql(profile: &ConnectionProfile, sql: &str) -> Result<Value, Strin
 
     serde_json::from_str(&body)
         .map_err(|error| format!("Invalid SQL JSON response: {error}; body: {body}"))
+}
+
+async fn post_reducer_call(
+    profile: &ConnectionProfile,
+    function_name: &str,
+    args: Value,
+) -> Result<Value, String> {
+    let url = format!(
+        "{}/v1/database/{}/call/{}",
+        profile.base_url, profile.database, function_name
+    );
+    let mut request = client()?.post(url).json(&args);
+
+    if let Some(token) = get_token(&profile.id) {
+        request = request.bearer_auth(token);
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|error| format!("Function request failed: {error}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("Could not read function response: {error}"))?;
+
+    if !status.is_success() {
+        return Err(format!("SpacetimeDB function returned {status}: {body}"));
+    }
+
+    if body.trim().is_empty() {
+        Ok(Value::Null)
+    } else {
+        serde_json::from_str(&body)
+            .map_err(|error| format!("Invalid function JSON response: {error}; body: {body}"))
+    }
 }
 
 fn variant_name(value: &Value) -> String {
@@ -678,6 +742,7 @@ pub async fn query_table(
     table_name: String,
     page: usize,
     page_size: usize,
+    where_clause: Option<String>,
 ) -> Result<TablePage, String> {
     let profile = profile_by_id(&state, &connection_id)?;
     let table = table_summary(&profile, &table_name).await?;
@@ -685,7 +750,8 @@ pub async fn query_table(
     let fetch_limit = ((page + 1) * safe_page_size).clamp(1, 1000);
     let probe_limit = (fetch_limit + 1).min(1001);
     let table_ident = quote_ident(&table.name);
-    let sql = format!("SELECT * FROM {table_ident} LIMIT {probe_limit};");
+    let where_sql = normalize_where_clause(where_clause.as_deref())?;
+    let sql = format!("SELECT * FROM {table_ident}{where_sql} LIMIT {probe_limit};");
     let results = post_sql(&profile, &sql).await?;
     let statements = results.as_array().cloned().unwrap_or_default();
     let all_rows = statements
@@ -724,6 +790,24 @@ pub async fn execute_sql(
     let profile = profile_by_id(&state, &connection_id)?;
     Ok(SqlResult {
         results: post_sql(&profile, &sql).await?,
+    })
+}
+
+#[tauri::command]
+pub async fn run_function(
+    state: tauri::State<'_, AppState>,
+    connection_id: String,
+    function_name: String,
+    args: Value,
+) -> Result<SqlResult, String> {
+    let profile = profile_by_id(&state, &connection_id)?;
+
+    if !args.is_array() {
+        return Err("Function arguments must be sent as a JSON array".into());
+    }
+
+    Ok(SqlResult {
+        results: post_reducer_call(&profile, &function_name, args).await?,
     })
 }
 

@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from "vue";
 import { getLogs, getSelectedConnectionId } from "../lib/spacetime";
-import { clearPageRefreshHandler, setPageRefreshHandler } from "../lib/pageActions";
+import {
+  clearPageRefreshHandler,
+  setPageRefreshHandler,
+} from "../lib/pageActions";
 
 const logs = ref("");
 const numLines = ref(200);
@@ -60,7 +63,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col gap-4">
+  <div class="flex h-full min-h-0 flex-col gap-4 p-4">
     <div class="shrink-0 flex justify-end">
       <div class="flex flex-wrap items-center gap-2">
         <UCheckbox v-model="autoRefresh" label="Live" />

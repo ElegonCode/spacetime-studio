@@ -111,7 +111,7 @@ const items: NavigationMenuItem[] = [
           />
         </div>
 
-        <main class="min-h-0 flex-1 overflow-hidden p-4">
+        <main class="min-h-0 flex-1 overflow-hidden">
           <RouterView />
         </main>
       </div>
