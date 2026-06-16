@@ -27,6 +27,21 @@ export default defineConfig(async () => ({
     force: true,
   },
 
+  build: {
+    rollupOptions: {
+      onLog(level, log, handler) {
+        if (
+          log.code === "INVALID_ANNOTATION" &&
+          log.id?.includes("@vueuse/core")
+        ) {
+          return;
+        }
+
+        handler(level, log);
+      },
+    },
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors
