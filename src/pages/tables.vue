@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { TabsItem } from "@nuxt/ui";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   createRow,
@@ -48,6 +49,18 @@ const filteredTables = computed(() => {
     table.name.toLowerCase().includes(search),
   );
 });
+const tableItems = computed<TabsItem[]>(() =>
+  filteredTables.value.map((table) => {
+    const isPrivate = table.access.toLowerCase() === "private";
+
+    return {
+      label: table.name,
+      value: table.name,
+      icon: isPrivate ? "i-lucide-lock" : "i-lucide-table",
+      ui: isPrivate ? { leadingIcon: "text-error" } : undefined,
+    };
+  }),
+);
 const selectedTable = computed<TableSummary | null>(
   () =>
     tables.value.find((table) => table.name === selectedTableName.value) ??
@@ -287,54 +300,37 @@ onUnmounted(() => {
       class="shrink-0"
     />
 
-    <div class="grid min-h-0 flex-1 xl:grid-cols-[320px_1fr]">
-      <aside class="flex min-h-0 flex-col bg-default/30 p-4">
-        <div class="mb-3 shrink-0 flex items-center justify-between gap-3">
+    <div class="grid min-h-0 flex-1 xl:grid-cols-[250px_1fr]">
+      <aside class="flex min-h-0 flex-col bg-default/30">
+        <div class="shrink-0 p-2">
           <UInput
             v-model="tableSearch"
             icon="i-lucide-search"
             placeholder="Search tables"
             aria-label="Search tables by name"
-            class="min-w-0 flex-1"
+            class="w-full"
           />
-          <UBadge color="neutral" variant="subtle"
-            >{{ filteredTables.length }}/{{ tables.length }} tables</UBadge
-          >
         </div>
-
-        <div class="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
+        <div class="min-h-0 flex-1 overflow-y-auto">
           <p
-            v-if="!filteredTables.length"
-            class="rounded-md border border-default bg-default/20 px-3 py-2 text-sm text-muted"
+            v-if="!tableItems.length"
+            class="mx-2 rounded-md border border-default bg-default/20 px-3 py-2 text-sm text-muted"
           >
             No tables found.
           </p>
-          <button
-            v-for="table in filteredTables"
-            :key="table.name"
-            class="w-full rounded-md border px-3 py-2 text-left transition"
-            :class="
-              table.name === selectedTableName
-                ? 'border-primary bg-primary/10'
-                : 'border-default bg-default/20 hover:bg-default/50'
-            "
-            @click="selectedTableName = table.name"
-          >
-            <div class="flex items-center justify-between gap-3">
-              <span class="truncate text-sm font-medium text-highlighted">{{
-                table.name
-              }}</span>
-              <UBadge size="sm" color="neutral" variant="subtle">{{
-                table.access
-              }}</UBadge>
-            </div>
-            <p class="mt-1 truncate text-xs text-muted">
-              {{ table.columns.length }} columns
-              <span v-if="table.primaryKey.length">
-                - PK {{ table.primaryKey.join(", ") }}</span
-              >
-            </p>
-          </button>
+          <UTabs
+            v-else
+            v-model="selectedTableName"
+            orientation="vertical"
+            variant="pill"
+            :content="false"
+            :items="tableItems"
+            class="w-full"
+            :ui="{
+              list: 'items-start bg-opacity-0 w-full',
+              trigger: 'w-full',
+            }"
+          />
         </div>
       </aside>
 
@@ -342,9 +338,9 @@ onUnmounted(() => {
         class="min-h-0 min-w-0 flex flex-col border-l border-default bg-default/30"
       >
         <div
-          class="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b border-default p-4"
+          class="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b border-default p-2"
         >
-          <div class="min-w-0">
+          <!-- <div class="min-w-0">
             <h2 class="truncate text-base font-semibold text-highlighted">
               {{ selectedTableName || "No table selected" }}
             </h2>
@@ -356,26 +352,26 @@ onUnmounted(() => {
               }}
               - page {{ page + 1 }}
             </p>
-          </div>
+          </div> -->
           <form
             class="flex flex-wrap items-center gap-2"
             @submit.prevent="submitWhere"
           >
-            <UInput
-              v-model="whereSql"
-              placeholder="WHERE"
-              class="w-52 sm:w-72"
-              aria-label="WHERE query"
-            />
-            <UButton
-              icon="i-lucide-search"
-              color="neutral"
-              variant="soft"
-              type="submit"
-              :loading="loadingRows"
-            >
-              Query
-            </UButton>
+            <UFieldGroup>
+              <UInput
+                v-model="whereSql"
+                placeholder="WHERE"
+                class="w-32 sm:w-48"
+                aria-label="WHERE query"
+              />
+              <UButton
+                icon="i-lucide-search"
+                color="neutral"
+                variant="soft"
+                type="submit"
+                :loading="loadingRows"
+              />
+            </UFieldGroup>
             <USelect
               v-model="pageSize"
               :items="[10, 25, 50, 100]"
