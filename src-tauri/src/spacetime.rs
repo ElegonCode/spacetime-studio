@@ -145,7 +145,26 @@ fn persist_profiles(app: &AppHandle, profiles: &[ConnectionProfile]) -> Result<(
 }
 
 fn normalize_url(url: &str) -> String {
-    url.trim().trim_end_matches('/').to_string()
+    let trimmed = url.trim().trim_end_matches('/');
+
+    if trimmed.is_empty() || trimmed.contains("://") {
+        return trimmed.to_string();
+    }
+
+    // Hosting providers hand out bare domains such as `my-app.up.railway.app`.
+    // reqwest rejects those, so assume the scheme the host most likely serves.
+    let authority = trimmed.split('/').next().unwrap_or(trimmed);
+    let host = authority
+        .rsplit_once(':')
+        .map(|(host, _port)| host)
+        .unwrap_or(authority);
+    let scheme = if matches!(host, "localhost" | "127.0.0.1" | "[::1]") {
+        "http"
+    } else {
+        "https"
+    };
+
+    format!("{scheme}://{trimmed}")
 }
 
 fn token_key(connection_id: &str) -> String {
@@ -212,6 +231,25 @@ fn sql_literal(value: &Value) -> Result<String, String> {
         Value::String(value) => Ok(format!("'{}'", value.replace('\'', "''"))),
         _ => Err("Only scalar values can be used in generic SQL mutations".into()),
     }
+}
+
+fn is_sql_literal_value(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::Number(_) | Value::String(_))
+}
+
+/// Builds an id that cannot collide with a profile that already exists. A bare
+/// millisecond timestamp collides when two saves land in the same millisecond, and a
+/// collision silently overwrites the earlier profile instead of adding a new one.
+fn new_connection_id(existing: &[ConnectionProfile], now: u64) -> String {
+    let mut candidate = format!("conn-{now}");
+    let mut suffix = 1u32;
+
+    while existing.iter().any(|profile| profile.id == candidate) {
+        candidate = format!("conn-{now}-{suffix}");
+        suffix += 1;
+    }
+
+    candidate
 }
 
 fn profile_by_id(state: &AppState, connection_id: &str) -> Result<ConnectionProfile, String> {
@@ -550,6 +588,12 @@ fn mutation_predicate(table: &TableSummary, row: &Value) -> Result<String, Strin
         table
             .columns
             .iter()
+            .filter(|column| {
+                object
+                    .get(&column.name)
+                    .map(is_sql_literal_value)
+                    .unwrap_or(false)
+            })
             .map(|column| column.name.clone())
             .collect::<Vec<_>>()
     } else {
@@ -557,7 +601,9 @@ fn mutation_predicate(table: &TableSummary, row: &Value) -> Result<String, Strin
     };
 
     if keys.is_empty() {
-        return Err("Could not derive a row identity predicate".into());
+        return Err(
+            "Could not derive a row identity predicate from SQL-compatible scalar values".into(),
+        );
     }
 
     keys.iter()
@@ -601,7 +647,10 @@ pub fn save_connection(
         .lock()
         .map_err(|_| "Connection state lock was poisoned".to_string())?;
     let now = now_ms();
-    let id = input.id.unwrap_or_else(|| format!("conn-{now}"));
+    let id = match input.id {
+        Some(id) => id,
+        None => new_connection_id(&profiles, now),
+    };
     let token = input
         .token
         .map(|token| token.trim().to_string())
@@ -947,4 +996,141 @@ pub async fn get_logs(
     }
 
     Ok(body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn table_with_columns(primary_key: Vec<&str>) -> TableSummary {
+        TableSummary {
+            name: "players".to_string(),
+            table_type: "user".to_string(),
+            access: "public".to_string(),
+            columns: vec![
+                ColumnSummary {
+                    name: "id".to_string(),
+                    r#type: "u64".to_string(),
+                },
+                ColumnSummary {
+                    name: "name".to_string(),
+                    r#type: "String".to_string(),
+                },
+                ColumnSummary {
+                    name: "stats".to_string(),
+                    r#type: "Stats".to_string(),
+                },
+            ],
+            primary_key: primary_key.into_iter().map(str::to_string).collect(),
+        }
+    }
+
+    fn profile_with_id(id: &str) -> ConnectionProfile {
+        ConnectionProfile {
+            id: id.to_string(),
+            name: "Existing".to_string(),
+            base_url: "https://maincloud.spacetimedb.com".to_string(),
+            database: "elegon".to_string(),
+            identity: None,
+            has_token: false,
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+
+    #[test]
+    fn new_connection_id_uses_the_timestamp_when_it_is_free() {
+        assert_eq!(new_connection_id(&[], 42), "conn-42");
+    }
+
+    #[test]
+    fn new_connection_id_never_reuses_an_existing_id() {
+        let existing = vec![profile_with_id("conn-42"), profile_with_id("conn-42-1")];
+        let id = new_connection_id(&existing, 42);
+
+        assert_eq!(id, "conn-42-2");
+        assert!(!existing.iter().any(|profile| profile.id == id));
+    }
+
+    #[test]
+    fn normalize_url_keeps_an_explicit_scheme() {
+        assert_eq!(
+            normalize_url("  http://localhost:3000/ "),
+            "http://localhost:3000"
+        );
+        assert_eq!(
+            normalize_url("https://maincloud.spacetimedb.com"),
+            "https://maincloud.spacetimedb.com"
+        );
+    }
+
+    #[test]
+    fn normalize_url_assumes_https_for_a_bare_remote_host() {
+        assert_eq!(
+            normalize_url("my-app.up.railway.app"),
+            "https://my-app.up.railway.app"
+        );
+        assert_eq!(
+            normalize_url("my-app.up.railway.app:8080/"),
+            "https://my-app.up.railway.app:8080"
+        );
+    }
+
+    #[test]
+    fn normalize_url_assumes_http_for_a_bare_loopback_host() {
+        assert_eq!(normalize_url("localhost:3000"), "http://localhost:3000");
+        assert_eq!(normalize_url("127.0.0.1"), "http://127.0.0.1");
+        assert_eq!(normalize_url("[::1]:3000"), "http://[::1]:3000");
+    }
+
+    #[test]
+    fn normalize_url_leaves_an_empty_value_empty() {
+        assert_eq!(normalize_url("   "), "");
+    }
+
+    #[test]
+    fn mutation_predicate_without_primary_key_uses_scalar_columns() {
+        let table = table_with_columns(Vec::new());
+        let row = json!({
+            "id": 7,
+            "name": "Ada",
+            "stats": { "wins": 3 },
+        });
+
+        assert_eq!(
+            mutation_predicate(&table, &row).unwrap(),
+            "\"id\" = 7 AND \"name\" = 'Ada'"
+        );
+    }
+
+    #[test]
+    fn mutation_predicate_with_primary_key_still_requires_scalar_value() {
+        let table = table_with_columns(vec!["stats"]);
+        let row = json!({
+            "id": 7,
+            "name": "Ada",
+            "stats": { "wins": 3 },
+        });
+
+        assert_eq!(
+            mutation_predicate(&table, &row).unwrap_err(),
+            "Only scalar values can be used in generic SQL mutations"
+        );
+    }
+
+    #[test]
+    fn mutation_predicate_without_usable_scalar_columns_errors_clearly() {
+        let table = table_with_columns(Vec::new());
+        let row = json!({
+            "id": null,
+            "name": null,
+            "stats": { "wins": 3 },
+        });
+
+        assert_eq!(
+            mutation_predicate(&table, &row).unwrap_err(),
+            "Could not derive a row identity predicate from SQL-compatible scalar values"
+        );
+    }
 }

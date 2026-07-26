@@ -91,11 +91,26 @@ Tauri will start the Vite dev server and open the Spacetime Studio desktop windo
 1. Open Spacetime Studio.
 2. Create a connection profile.
 3. Enter a friendly profile name.
-4. Enter the SpacetimeDB host URL, such as `http://localhost:3000`.
+4. Pick a host:
+   - **Local server** uses `http://localhost:3000`.
+   - **Hosted in Maincloud** uses `https://maincloud.spacetimedb.com`.
+   - **Self-hosted** lets you enter the public URL of a server you run yourself, for
+     example a Railway, Fly, or VPS deployment. A bare domain such as
+     `my-app.up.railway.app` is fine; `https://` is assumed when you leave the scheme
+     off, except for loopback hosts, which assume `http://`.
 5. Enter the database name or database identity.
-6. Optionally enter a bearer token for private databases or admin-only actions.
+6. Optionally enter an auth token for private databases or admin-only actions.
+   SpacetimeDB uses a signed JWT sent as a bearer token on every host, self-hosted
+   included. Tokens are signed by the issuing server, so a Maincloud token will not
+   work against your own server and vice versa. To get a token from a server you host,
+   add it with `spacetime server add`, run
+   `spacetime login --server-issued-login <server>`, then copy the value from
+   `spacetime login show --token`.
 7. Click the test action to verify the host and database can be reached.
 8. Save the profile and select it.
+
+When editing an existing profile, leave the token field blank to keep the token that is
+already in your OS keychain.
 
 Connection profile metadata is stored locally by the app. Bearer tokens are stored in your OS keychain using the service name `spacetime-studio`.
 

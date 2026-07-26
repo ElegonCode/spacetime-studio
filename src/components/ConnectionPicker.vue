@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   clearSelectedConnectionId,
   deleteConnection,
@@ -16,22 +16,27 @@ const emit = defineEmits<{
   changed: [connection: ConnectionProfile | null];
 }>();
 
-const connections = ref<ConnectionProfile[]>([]);
-const selectedId = ref<string | undefined>(getSelectedConnectionId() ?? undefined);
-const loading = ref(false);
-const testing = ref(false);
-const error = ref("");
-const status = ref("");
-const editorOpen = ref(false);
 const MAINCLOUD_URL = "https://maincloud.spacetimedb.com";
 const LOCALHOST_URL = "http://localhost:3000";
 
 const hostModeOptions = [
+  { label: "Local server", value: "local" },
   { label: "Hosted in Maincloud", value: "maincloud" },
-  { label: "Custom", value: "custom" },
+  { label: "Self-hosted (Railway, Fly, VPS)", value: "custom" },
 ];
 
-type HostMode = "maincloud" | "custom";
+type HostMode = "local" | "maincloud" | "custom";
+
+const connections = ref<ConnectionProfile[]>([]);
+const selectedId = ref<string | undefined>(getSelectedConnectionId() ?? undefined);
+const loading = ref(false);
+const saving = ref(false);
+const testing = ref(false);
+const deleting = ref(false);
+const error = ref("");
+const status = ref("");
+const editorOpen = ref(false);
+const pendingDelete = ref<ConnectionProfile | null>(null);
 
 const form = ref({
   id: "",
@@ -40,22 +45,48 @@ const form = ref({
   database: "",
   token: "",
 });
-const hostMode = ref<HostMode>("custom");
+const hostMode = ref<HostMode>("local");
 
 const selectedConnection = computed(
   () => connections.value.find((connection) => connection.id === selectedId.value) ?? null,
 );
 
-const connectionOptions = computed(() =>
-  connections.value.map((connection) => ({
-    label: `${connection.name} - ${connection.database}`,
-    value: connection.id,
-  })),
+const isEditing = computed(() => Boolean(form.value.id));
+
+const editingHasToken = computed(
+  () =>
+    connections.value.find((connection) => connection.id === form.value.id)?.hasToken ?? false,
 );
 
-const selectedBaseUrl = computed(() =>
-  hostMode.value === "maincloud" ? MAINCLOUD_URL : form.value.baseUrl,
+const selectedBaseUrl = computed(() => {
+  if (hostMode.value === "maincloud") return MAINCLOUD_URL;
+  if (hostMode.value === "local") return LOCALHOST_URL;
+  return form.value.baseUrl;
+});
+
+const tokenHelp = computed(() =>
+  hostMode.value === "maincloud"
+    ? "Optional. Run `spacetime login`, then `spacetime login show --token` to copy it."
+    : "Optional for public databases. Run `spacetime login --server-issued-login <server>`, then `spacetime login show --token` to copy the token your own server issued.",
 );
+
+function hostModeForUrl(baseUrl: string): HostMode {
+  if (baseUrl === MAINCLOUD_URL) return "maincloud";
+  if (baseUrl === LOCALHOST_URL) return "local";
+  return "custom";
+}
+
+function hostLabel(baseUrl: string) {
+  if (baseUrl === MAINCLOUD_URL) return "Maincloud";
+  return baseUrl.replace(/^https?:\/\//, "");
+}
+
+// Don't leave a preset URL sitting in the custom field once the user opts out of the preset.
+watch(hostMode, (mode) => {
+  if (mode === "custom" && hostModeForUrl(form.value.baseUrl) !== "custom") {
+    form.value.baseUrl = "";
+  }
+});
 
 function resetForm() {
   form.value = {
@@ -65,7 +96,7 @@ function resetForm() {
     database: "",
     token: "",
   };
-  hostMode.value = "custom";
+  hostMode.value = "local";
 }
 
 async function load() {
@@ -74,10 +105,18 @@ async function load() {
 
   try {
     connections.value = await listConnections();
-    if (!selectedId.value && connections.value.length > 0) {
-      selectedId.value = connections.value[0].id;
-      setSelectedConnectionId(selectedId.value);
+
+    // The stored id can point at a profile that no longer exists, which used to leave
+    // the picker stuck on a connection it could not resolve.
+    if (!connections.value.some((connection) => connection.id === selectedId.value)) {
+      selectedId.value = connections.value[0]?.id;
+      if (selectedId.value) {
+        setSelectedConnectionId(selectedId.value);
+      } else {
+        clearSelectedConnectionId();
+      }
     }
+
     emit("changed", selectedConnection.value);
   } catch (err) {
     error.value = String(err);
@@ -86,18 +125,15 @@ async function load() {
   }
 }
 
-function selectCurrent() {
-  if (selectedId.value) {
-    setSelectedConnectionId(selectedId.value);
-  } else {
-    clearSelectedConnectionId();
-  }
+function activate(connection: ConnectionProfile) {
+  selectedId.value = connection.id;
+  setSelectedConnectionId(connection.id);
+  error.value = "";
+  status.value = "";
   emit("changed", selectedConnection.value);
 }
 
-function editSelected() {
-  const connection = selectedConnection.value;
-  if (!connection) return;
+function editConnection(connection: ConnectionProfile) {
   form.value = {
     id: connection.id,
     name: connection.name,
@@ -105,7 +141,7 @@ function editSelected() {
     database: connection.database,
     token: "",
   };
-  hostMode.value = connection.baseUrl === MAINCLOUD_URL ? "maincloud" : "custom";
+  hostMode.value = hostModeForUrl(connection.baseUrl);
   error.value = "";
   status.value = "";
   editorOpen.value = true;
@@ -119,7 +155,9 @@ function newConnection() {
 }
 
 async function save() {
-  loading.value = true;
+  if (saving.value) return;
+
+  saving.value = true;
   error.value = "";
   status.value = "";
 
@@ -131,17 +169,20 @@ async function save() {
       database: form.value.database,
       token: form.value.token || undefined,
     });
+    const wasNew = !form.value.id;
     form.value.id = connection.id;
     form.value.token = "";
     selectedId.value = connection.id;
     setSelectedConnectionId(connection.id);
-    status.value = "Connection saved.";
     editorOpen.value = false;
     await load();
+    status.value = wasNew
+      ? `Added ${connection.name}.`
+      : `Saved changes to ${connection.name}.`;
   } catch (err) {
     error.value = String(err);
   } finally {
-    loading.value = false;
+    saving.value = false;
   }
 }
 
@@ -167,11 +208,15 @@ async function test() {
   }
 }
 
-async function removeSelected() {
-  const connection = selectedConnection.value;
-  if (!connection) return;
+function askDelete(connection: ConnectionProfile) {
+  pendingDelete.value = connection;
+}
 
-  loading.value = true;
+async function confirmDelete() {
+  const connection = pendingDelete.value;
+  if (!connection || deleting.value) return;
+
+  deleting.value = true;
   error.value = "";
   status.value = "";
 
@@ -181,12 +226,13 @@ async function removeSelected() {
       clearSelectedConnectionId();
       selectedId.value = undefined;
     }
-    status.value = "Connection removed.";
+    pendingDelete.value = null;
     await load();
+    status.value = `Removed ${connection.name}.`;
   } catch (err) {
     error.value = String(err);
   } finally {
-    loading.value = false;
+    deleting.value = false;
   }
 }
 
@@ -201,59 +247,131 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section>
-    <div class="rounded-lg border border-default bg-default/40 p-4">
-      <div class="mb-4 flex items-center justify-between gap-3">
+  <section class="rounded-lg border border-default bg-default/40 p-4">
+    <div class="mb-4 flex items-center justify-between gap-3">
+      <div>
         <h2 class="text-base font-semibold text-highlighted">Connections</h2>
-        <div class="flex gap-2">
-          <UButton icon="i-lucide-plus" size="sm" @click="newConnection">
-            New
-          </UButton>
-        </div>
+        <p class="text-xs text-muted">Select the connection the workspace should use.</p>
       </div>
-
-      <USelect
-        v-model="selectedId"
-        :items="connectionOptions"
-        placeholder="Select a connection"
-        class="w-full"
-        @update:model-value="selectCurrent"
-      />
-
-      <div class="mt-3 flex gap-2">
-        <UButton icon="i-lucide-pencil" color="neutral" variant="soft" @click="editSelected">
-          Edit
-        </UButton>
-        <UButton icon="i-lucide-trash-2" color="error" variant="soft" @click="removeSelected">
-          Delete
-        </UButton>
-      </div>
-
-      <div v-if="selectedConnection" class="mt-4 space-y-1 text-sm text-muted">
-        <p>{{ selectedConnection.baseUrl }}</p>
-        <p>{{ selectedConnection.database }}</p>
-        <UBadge :color="selectedConnection.hasToken ? 'success' : 'warning'" variant="subtle">
-          {{ selectedConnection.hasToken ? "Stored token" : "Anonymous or public access" }}
-        </UBadge>
-      </div>
-
-      <UAlert v-if="error && !editorOpen" color="error" variant="subtle" class="mt-4" :description="error" />
-      <UAlert v-if="status && !editorOpen" color="success" variant="subtle" class="mt-4" :description="status" />
+      <UButton icon="i-lucide-plus" size="sm" @click="newConnection">New</UButton>
     </div>
+
+    <p v-if="loading && connections.length === 0" class="py-6 text-center text-sm text-muted">
+      Loading connections...
+    </p>
+
+    <div
+      v-else-if="connections.length === 0"
+      class="rounded-lg border border-dashed border-default px-4 py-8 text-center"
+    >
+      <p class="text-sm font-medium text-highlighted">No connections yet</p>
+      <p class="mt-1 text-xs text-muted">
+        Add a local, Maincloud, or self-hosted SpacetimeDB database to get started.
+      </p>
+      <UButton icon="i-lucide-plus" size="sm" class="mt-4" @click="newConnection">
+        Add connection
+      </UButton>
+    </div>
+
+    <ul v-else class="space-y-2" role="radiogroup" aria-label="Active connection">
+      <li
+        v-for="connection in connections"
+        :key="connection.id"
+        class="flex items-stretch gap-1 rounded-lg border transition-colors"
+        :class="
+          connection.id === selectedId
+            ? 'border-primary bg-primary/5'
+            : 'border-default hover:bg-elevated/50'
+        "
+      >
+        <button
+          type="button"
+          role="radio"
+          :aria-checked="connection.id === selectedId"
+          class="flex min-w-0 flex-1 items-center gap-3 rounded-l-lg px-3 py-2.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          @click="activate(connection)"
+        >
+          <UIcon
+            :name="
+              connection.id === selectedId ? 'i-lucide-circle-check' : 'i-lucide-circle'
+            "
+            class="size-4 shrink-0"
+            :class="connection.id === selectedId ? 'text-primary' : 'text-muted'"
+          />
+          <span class="min-w-0 flex-1">
+            <span class="flex items-center gap-2">
+              <span class="truncate text-sm font-medium text-highlighted">
+                {{ connection.name }}
+              </span>
+              <UBadge v-if="connection.id === selectedId" size="sm" variant="subtle">
+                Active
+              </UBadge>
+            </span>
+            <span class="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+              <span class="truncate">{{ connection.database }}</span>
+              <span aria-hidden="true">&middot;</span>
+              <span class="truncate">{{ hostLabel(connection.baseUrl) }}</span>
+              <span
+                class="flex shrink-0 items-center"
+                :title="connection.hasToken ? 'Stored token' : 'Anonymous or public access'"
+              >
+                <UIcon
+                  :name="connection.hasToken ? 'i-lucide-key-round' : 'i-lucide-globe'"
+                  class="size-3"
+                />
+                <span class="sr-only">
+                  {{ connection.hasToken ? "Stored token" : "Anonymous or public access" }}
+                </span>
+              </span>
+            </span>
+          </span>
+        </button>
+
+        <div class="flex shrink-0 items-center gap-1 pr-2">
+          <UButton
+            icon="i-lucide-pencil"
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            aria-label="Edit connection"
+            @click="editConnection(connection)"
+          />
+          <UButton
+            icon="i-lucide-trash-2"
+            color="error"
+            variant="ghost"
+            size="sm"
+            aria-label="Delete connection"
+            @click="askDelete(connection)"
+          />
+        </div>
+      </li>
+    </ul>
+
+    <UAlert
+      v-if="error && !editorOpen"
+      color="error"
+      variant="subtle"
+      class="mt-4"
+      :description="error"
+    />
+    <UAlert
+      v-if="status && !editorOpen"
+      color="success"
+      variant="subtle"
+      class="mt-4"
+      :description="status"
+    />
 
     <USlideover
       v-model:open="editorOpen"
-      :title="form.id ? 'Edit Connection' : 'New Connection'"
+      :title="isEditing ? 'Edit Connection' : 'New Connection'"
       description="SpacetimeDB HTTP API profile"
       side="right"
       :ui="{ content: 'sm:max-w-xl', body: 'min-h-0 flex-1', footer: 'shrink-0' }"
     >
       <template #body>
         <form class="space-y-4" @submit.prevent="save">
-          <div class="flex justify-end">
-            <UBadge variant="subtle">HTTP API</UBadge>
-          </div>
-
           <UFormField label="Name">
             <UInput v-model="form.name" class="w-full" />
           </UFormField>
@@ -263,18 +381,30 @@ onUnmounted(() => {
           <UFormField label="Host">
             <USelect v-model="hostMode" :items="hostModeOptions" class="w-full" />
           </UFormField>
-          <UFormField v-if="hostMode === 'custom'" label="Custom host URL">
-            <UInput v-model="form.baseUrl" class="w-full" :placeholder="LOCALHOST_URL" />
+          <UFormField
+            v-if="hostMode === 'custom'"
+            label="Host URL"
+            help="Your server's public domain. https:// is assumed if you leave the scheme off."
+          >
+            <UInput
+              v-model="form.baseUrl"
+              class="w-full"
+              placeholder="my-app.up.railway.app"
+            />
           </UFormField>
           <UFormField v-else label="Host URL">
-            <UInput :model-value="MAINCLOUD_URL" class="w-full" disabled />
+            <UInput :model-value="selectedBaseUrl" class="w-full" disabled />
           </UFormField>
-          <UFormField label="Bearer token">
+          <UFormField label="Auth token" :help="tokenHelp">
             <UInput
               v-model="form.token"
               class="w-full"
               type="password"
-              placeholder="Stored in the OS credential manager"
+              :placeholder="
+                isEditing && editingHasToken
+                  ? 'Leave blank to keep the stored token'
+                  : 'Stored in the OS credential manager'
+              "
             />
           </UFormField>
 
@@ -295,9 +425,25 @@ onUnmounted(() => {
           >
             Test
           </UButton>
-          <UButton icon="i-lucide-save" :loading="loading" @click="save">Save</UButton>
+          <UButton icon="i-lucide-save" :loading="saving" @click="save">Save</UButton>
         </div>
       </template>
     </USlideover>
+
+    <UModal
+      :open="pendingDelete !== null"
+      title="Delete connection"
+      :description="`Remove ${pendingDelete?.name ?? ''} and its stored token from this computer? The database itself is not affected.`"
+      @update:open="pendingDelete = null"
+    >
+      <template #footer>
+        <div class="flex w-full justify-end gap-2">
+          <UButton color="neutral" variant="soft" @click="pendingDelete = null">
+            Cancel
+          </UButton>
+          <UButton color="error" :loading="deleting" @click="confirmDelete">Delete</UButton>
+        </div>
+      </template>
+    </UModal>
   </section>
 </template>
