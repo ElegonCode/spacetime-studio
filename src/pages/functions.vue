@@ -202,34 +202,29 @@ onUnmounted(() => {
         <thead class="bg-default/60">
           <tr>
             <th
-              class="whitespace-nowrap border-b border-default px-3 py-2 text-left text-xs font-medium text-muted"
+              class="whitespace-nowrap border-b border-r border-default px-3 py-2 text-left text-xs font-medium text-muted"
             >
               Function
             </th>
             <th
-              class="whitespace-nowrap border-b border-default px-3 py-2 text-left text-xs font-medium text-muted"
+              class="whitespace-nowrap border-b border-r border-default px-3 py-2 text-left text-xs font-medium text-muted"
             >
               Type
             </th>
             <th
-              class="min-w-80 border-b border-default px-3 py-2 text-left text-xs font-medium text-muted"
+              class="min-w-80 border-b border-r border-default px-3 py-2 text-left text-xs font-medium text-muted"
             >
               Parameters
             </th>
             <th
-              class="sticky right-0 z-20 w-28 border-b border-default bg-default/95 px-3 py-2 text-right text-xs font-medium text-muted shadow-[-12px_0_18px_-18px_rgba(0,0,0,0.9)]"
+              class="sticky right-0 z-20 w-28 border-b border-l border-default bg-default/95 px-3 py-2 text-right text-xs font-medium text-muted shadow-[-12px_0_18px_-18px_rgba(0,0,0,0.9)]"
             >
               Actions
             </th>
           </tr>
         </thead>
         <tbody>
-          <tr v-if="loading">
-            <td class="px-3 py-6 text-muted" colspan="4">
-              Loading functions...
-            </td>
-          </tr>
-          <tr v-else-if="!functions.length">
+          <tr v-if="!loading && !functions.length">
             <td class="px-3 py-6 text-muted" colspan="4">
               No functions found.
             </td>
@@ -240,15 +235,19 @@ onUnmounted(() => {
             class="cursor-pointer border-b border-default/60 transition hover:bg-default/50"
             @click="openRunner(fn)"
           >
-            <td class="min-w-56 px-3 py-2 align-top">
+            <td
+              class="min-w-56 border-r border-default/60 px-3 py-2 align-top"
+            >
               <span class="font-medium text-highlighted">{{ fn.name }}</span>
             </td>
-            <td class="whitespace-nowrap px-3 py-2 align-top">
+            <td
+              class="whitespace-nowrap border-r border-default/60 px-3 py-2 align-top"
+            >
               <UBadge color="neutral" variant="subtle">{{
                 fn.lifecycle ?? "callable"
               }}</UBadge>
             </td>
-            <td class="px-3 py-2 align-top">
+            <td class="border-r border-default/60 px-3 py-2 align-top">
               <div v-if="fn.params.length" class="flex flex-wrap gap-2">
                 <UBadge
                   v-for="param in fn.params"
@@ -262,7 +261,7 @@ onUnmounted(() => {
               <span v-else class="text-muted">No parameters</span>
             </td>
             <td
-              class="sticky right-0 z-10 whitespace-nowrap bg-default/95 px-3 py-2 text-right align-top shadow-[-12px_0_18px_-18px_rgba(0,0,0,0.9)]"
+              class="sticky right-0 z-10 whitespace-nowrap border-l border-default/60 bg-default/95 px-3 py-2 text-right align-top shadow-[-12px_0_18px_-18px_rgba(0,0,0,0.9)]"
             >
               <UButton
                 icon="i-lucide-play"

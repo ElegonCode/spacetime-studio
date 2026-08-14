@@ -19,6 +19,7 @@ pub fn run() {
             spacetime::delete_connection,
             spacetime::test_connection,
             spacetime::get_schema,
+            spacetime::get_overview,
             spacetime::query_table,
             spacetime::execute_sql,
             spacetime::run_function,

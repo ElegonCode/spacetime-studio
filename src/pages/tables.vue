@@ -415,27 +415,19 @@ onUnmounted(() => {
                 <th
                   v-for="column in tablePage?.columns ?? []"
                   :key="column.name"
-                  class="whitespace-nowrap border-b border-default px-3 py-2 text-left text-xs font-medium text-muted"
+                  class="whitespace-nowrap border-b border-r border-default px-3 py-2 text-left text-xs font-medium text-muted"
                 >
                   {{ column.name }}
                   <span class="font-normal">({{ column.type }})</span>
                 </th>
                 <th
-                  class="sticky right-0 z-20 w-28 border-b border-default bg-default/95 px-3 py-2 text-right text-xs font-medium text-muted shadow-[-12px_0_18px_-18px_rgba(0,0,0,0.9)]"
+                  class="sticky right-0 z-20 w-28 border-b border-l border-default bg-default/95 px-3 py-2 text-right text-xs font-medium text-muted shadow-[-12px_0_18px_-18px_rgba(0,0,0,0.9)]"
                 >
                   Actions
                 </th>
               </tr>
             </thead>
             <tbody>
-              <tr v-if="loadingRows">
-                <td
-                  class="px-3 py-6 text-muted"
-                  :colspan="(tablePage?.columns.length ?? 0) + 1"
-                >
-                  Loading rows...
-                </td>
-              </tr>
               <tr
                 v-for="(row, rowIndex) in tablePage?.rows ?? []"
                 :key="rowIndex"
@@ -444,7 +436,7 @@ onUnmounted(() => {
                 <td
                   v-for="column in tablePage?.columns ?? []"
                   :key="column.name"
-                  class="min-w-40 px-3 py-2 align-top"
+                  class="min-w-40 border-r border-default/60 px-3 py-2 align-top"
                 >
                   <input
                     class="w-full rounded border border-transparent bg-transparent px-2 py-1 text-highlighted outline-none focus:border-primary focus:bg-default"
@@ -459,7 +451,7 @@ onUnmounted(() => {
                   />
                 </td>
                 <td
-                  class="sticky right-0 z-10 whitespace-nowrap bg-default/95 px-3 py-2 text-right align-top shadow-[-12px_0_18px_-18px_rgba(0,0,0,0.9)]"
+                  class="sticky right-0 z-10 whitespace-nowrap border-l border-default/60 bg-default/95 px-3 py-2 text-right align-top shadow-[-12px_0_18px_-18px_rgba(0,0,0,0.9)]"
                 >
                   <UButton
                     icon="i-lucide-save"

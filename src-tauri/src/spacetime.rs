@@ -2,6 +2,7 @@ use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
+    collections::HashMap,
     fs,
     path::PathBuf,
     sync::Mutex,
@@ -106,6 +107,31 @@ pub struct TablePage {
 #[serde(rename_all = "camelCase")]
 pub struct SqlResult {
     pub results: Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableSizeSummary {
+    pub name: String,
+    pub row_count: Option<u64>,
+    pub row_bytes: u64,
+    pub index_bytes: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseOverview {
+    pub database_identity: Option<String>,
+    pub connected_clients: Option<u64>,
+    /// `st_client`, `metrics`, or `unavailable` - the frontend explains how the
+    /// number was obtained so an estimate is never read as an exact figure.
+    pub connections_source: String,
+    pub connections_note: Option<String>,
+    pub tables: Vec<TableSizeSummary>,
+    /// `metrics`, `estimate`, or `unavailable`.
+    pub sizes_source: String,
+    pub sizes_note: Option<String>,
+    pub blob_store_bytes: Option<u64>,
 }
 
 fn now_ms() -> u64 {
@@ -237,6 +263,254 @@ fn is_sql_literal_value(value: &Value) -> bool {
     matches!(value, Value::Bool(_) | Value::Number(_) | Value::String(_))
 }
 
+/// Splits on `separator`, ignoring separators inside a double-quoted label value.
+fn split_outside_quotes(text: &str, separator: char) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut in_quotes = false;
+    let mut escaped = false;
+
+    for (index, character) in text.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if character == '\\' && in_quotes {
+            escaped = true;
+        } else if character == '"' {
+            in_quotes = !in_quotes;
+        } else if character == separator && !in_quotes {
+            parts.push(&text[start..index]);
+            start = index + character.len_utf8();
+        }
+    }
+
+    parts.push(&text[start..]);
+    parts
+}
+
+/// Index of the `}` that closes a label block, skipping any `}` inside a quoted value.
+fn label_block_end(text: &str) -> Option<usize> {
+    let mut in_quotes = false;
+    let mut escaped = false;
+
+    for (index, character) in text.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if character == '\\' && in_quotes {
+            escaped = true;
+        } else if character == '"' {
+            in_quotes = !in_quotes;
+        } else if character == '}' && !in_quotes {
+            return Some(index);
+        }
+    }
+
+    None
+}
+
+fn unescape_label_value(value: &str) -> String {
+    let mut unescaped = String::with_capacity(value.len());
+    let mut characters = value.chars();
+
+    while let Some(character) = characters.next() {
+        if character != '\\' {
+            unescaped.push(character);
+            continue;
+        }
+
+        match characters.next() {
+            Some('n') => unescaped.push('\n'),
+            Some('"') => unescaped.push('"'),
+            Some('\\') => unescaped.push('\\'),
+            Some(other) => {
+                unescaped.push('\\');
+                unescaped.push(other);
+            }
+            None => unescaped.push('\\'),
+        }
+    }
+
+    unescaped
+}
+
+fn parse_labels(block: &str) -> Vec<(String, String)> {
+    split_outside_quotes(block, ',')
+        .into_iter()
+        .filter_map(|pair| {
+            let (name, value) = pair.split_once('=')?;
+            let value = value.trim().strip_prefix('"')?.strip_suffix('"')?;
+            Some((name.trim().to_string(), unescape_label_value(value)))
+        })
+        .collect()
+}
+
+/// Splits an exposition line into its metric name and everything after it, so a
+/// caller can reject a line by name before paying to parse its labels.
+fn split_metric_name(line: &str) -> Option<(&str, &str)> {
+    let line = line.trim();
+
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+
+    let name_end = line.find(|character: char| character == '{' || character.is_whitespace())?;
+    Some(line.split_at(name_end))
+}
+
+fn parse_labels_and_value(rest: &str) -> Option<(Vec<(String, String)>, f64)> {
+    let (labels, rest) = match rest.strip_prefix('{') {
+        Some(rest) => {
+            let end = label_block_end(rest)?;
+            (parse_labels(&rest[..end]), &rest[end + 1..])
+        }
+        None => (Vec::new(), rest),
+    };
+
+    let value = rest.split_whitespace().next()?.parse::<f64>().ok()?;
+    Some((labels, value))
+}
+
+fn strip_identity_prefix(identity: &str) -> &str {
+    let identity = identity.trim();
+    identity
+        .strip_prefix("0x")
+        .or_else(|| identity.strip_prefix("0X"))
+        .unwrap_or(identity)
+}
+
+fn identity_matches(label_value: &str, wanted: &str) -> bool {
+    strip_identity_prefix(label_value).eq_ignore_ascii_case(wanted)
+}
+
+fn gauge_to_u64(value: f64) -> u64 {
+    if value.is_finite() && value > 0.0 {
+        value as u64
+    } else {
+        0
+    }
+}
+
+#[derive(Debug, Default, PartialEq)]
+struct DatabaseMetrics {
+    connected_clients: Option<u64>,
+    row_bytes: HashMap<String, u64>,
+    index_bytes: HashMap<String, u64>,
+    row_counts: HashMap<String, u64>,
+    blob_store_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Gauge {
+    RowBytes,
+    IndexBytes,
+    RowCount,
+    ConnectedClients,
+    BlobStoreBytes,
+}
+
+/// Reads every gauge the overview needs in one pass. The exposition body covers
+/// the whole node rather than a single database, so it can be large on a busy
+/// host - lines are rejected by metric name before their labels are parsed.
+fn read_database_metrics(text: &str, database_identity: &str) -> DatabaseMetrics {
+    let wanted = strip_identity_prefix(database_identity);
+    let mut metrics = DatabaseMetrics::default();
+
+    for line in text.lines() {
+        let Some((name, rest)) = split_metric_name(line) else {
+            continue;
+        };
+
+        let gauge = match name {
+            "spacetime_data_size_bytes_used_by_rows" => Gauge::RowBytes,
+            "spacetime_data_size_table_bytes_used_by_index_keys" => Gauge::IndexBytes,
+            "spacetime_data_size_table_num_rows" => Gauge::RowCount,
+            "spacetime_worker_connected_clients" => Gauge::ConnectedClients,
+            "spacetime_data_size_blob_store_bytes_used_by_blobs" => Gauge::BlobStoreBytes,
+            _ => continue,
+        };
+
+        let Some((labels, value)) = parse_labels_and_value(rest) else {
+            continue;
+        };
+        let label = |wanted_label: &str| {
+            labels
+                .iter()
+                .find(|(name, _)| name == wanted_label)
+                .map(|(_, value)| value.as_str())
+        };
+
+        // Data size metrics label the database `db`; worker metrics use
+        // `database_identity` for the same thing.
+        let belongs_to_database = label("db")
+            .or_else(|| label("database_identity"))
+            .is_some_and(|identity| identity_matches(identity, wanted));
+
+        if !belongs_to_database {
+            continue;
+        }
+
+        let value = gauge_to_u64(value);
+
+        if gauge == Gauge::ConnectedClients {
+            metrics.connected_clients = Some(value);
+            continue;
+        }
+
+        if gauge == Gauge::BlobStoreBytes {
+            metrics.blob_store_bytes = Some(value);
+            continue;
+        }
+
+        let Some(table) = label("table_name") else {
+            continue;
+        };
+        let target = match gauge {
+            Gauge::RowBytes => &mut metrics.row_bytes,
+            Gauge::IndexBytes => &mut metrics.index_bytes,
+            _ => &mut metrics.row_counts,
+        };
+        target.insert(table.to_string(), value);
+    }
+
+    metrics
+}
+
+/// Rough on-disk width of one row, used only when the metrics endpoint is out of
+/// reach. Variable-length values live outside the row, so those are an average
+/// rather than a measurement.
+fn estimated_column_bytes(column_type: &str) -> u64 {
+    match column_type.to_ascii_lowercase().as_str() {
+        "bool" | "i8" | "u8" => 1,
+        "i16" | "u16" => 2,
+        "i32" | "u32" | "f32" => 4,
+        "i64" | "u64" | "f64" => 8,
+        "i128" | "u128" => 16,
+        "i256" | "u256" => 32,
+        "string" | "array" => 32,
+        _ => 16,
+    }
+}
+
+fn estimated_row_bytes(columns: &[ColumnSummary]) -> u64 {
+    columns
+        .iter()
+        .map(|column| estimated_column_bytes(&column.r#type))
+        .sum::<u64>()
+        .max(1)
+}
+
+/// Pulls the row count out of one `SELECT count(*)` statement result. Large
+/// integers can arrive as JSON strings, so both shapes are accepted.
+fn statement_row_count(statement: &Value) -> Option<u64> {
+    let cell = match statement.get("rows")?.as_array()?.first()? {
+        Value::Array(values) => values.first()?,
+        other => other,
+    };
+
+    cell.as_u64()
+        .or_else(|| cell.as_str().and_then(|text| text.parse().ok()))
+        .or_else(|| cell.as_f64().map(gauge_to_u64))
+}
+
 /// Builds an id that cannot collide with a profile that already exists. A bare
 /// millisecond timestamp collides when two saves land in the same millisecond, and a
 /// collision silently overwrites the earlier profile instead of adding a new one.
@@ -309,6 +583,31 @@ async fn get_json(
     };
 
     Ok((value, headers))
+}
+
+async fn get_text(profile: &ConnectionProfile, path: &str) -> Result<String, String> {
+    let url = format!("{}{}", profile.base_url, path);
+    let mut request = client()?.get(url);
+
+    if let Some(token) = get_token(&profile.id) {
+        request = request.bearer_auth(token);
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|error| format!("HTTP request failed: {error}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("Could not read HTTP response: {error}"))?;
+
+    if !status.is_success() {
+        return Err(format!("SpacetimeDB returned {status}"));
+    }
+
+    Ok(body)
 }
 
 async fn post_sql(profile: &ConnectionProfile, sql: &str) -> Result<Value, String> {
@@ -963,6 +1262,180 @@ pub async fn delete_row(
     })
 }
 
+async fn count_connected_clients(profile: &ConnectionProfile) -> Result<u64, String> {
+    post_sql(profile, "SELECT count(*) as n FROM st_client;")
+        .await?
+        .as_array()
+        .and_then(|statements| statements.first())
+        .and_then(statement_row_count)
+        .ok_or_else(|| "st_client did not return a row count".to_string())
+}
+
+/// Counts every table in one round trip, falling back to one request per table so
+/// that a single unreadable table does not blank out the whole page.
+async fn count_rows_per_table(
+    profile: &ConnectionProfile,
+    tables: &[TableSummary],
+) -> Vec<Option<u64>> {
+    let statement_for = |table: &TableSummary| {
+        format!(
+            "SELECT count(*) as n FROM {};",
+            quote_ident(&table.name)
+        )
+    };
+
+    let batch = tables
+        .iter()
+        .map(statement_for)
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    if let Ok(results) = post_sql(profile, &batch).await {
+        let statements = results.as_array().cloned().unwrap_or_default();
+        if statements.len() == tables.len() {
+            return statements.iter().map(statement_row_count).collect();
+        }
+    }
+
+    let mut counts = Vec::with_capacity(tables.len());
+
+    for table in tables {
+        let count = post_sql(profile, &statement_for(table))
+            .await
+            .ok()
+            .and_then(|results| {
+                results
+                    .as_array()
+                    .and_then(|statements| statements.first())
+                    .and_then(statement_row_count)
+            });
+        counts.push(count);
+    }
+
+    counts
+}
+
+#[tauri::command]
+pub async fn get_overview(
+    state: tauri::State<'_, AppState>,
+    connection_id: String,
+) -> Result<DatabaseOverview, String> {
+    let profile = profile_by_id(&state, &connection_id)?;
+    let schema = get_schema_for_profile(&profile).await?;
+
+    let database_identity = get_json(
+        &profile,
+        &format!("/v1/database/{}", profile.database),
+        None,
+    )
+    .await
+    .ok()
+    .and_then(|(info, _)| {
+        info.get("database_identity")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    });
+
+    // Node metrics are exact but usually only reachable on a host you run
+    // yourself; SQL against the database works anywhere the token allows it.
+    // Both are keyed by database identity, so neither is usable without it.
+    let metrics_body = get_text(&profile, "/v1/metrics").await;
+    let metrics = match (metrics_body.as_deref(), database_identity.as_deref()) {
+        (Ok(text), Some(identity)) => Ok(Some(read_database_metrics(text, identity))),
+        (Ok(_), None) => Ok(None),
+        (Err(error), _) => Err(error.as_str()),
+    };
+
+    let mut connected_clients = None;
+    let mut connections_source = "unavailable";
+    let mut connections_note = None;
+
+    match count_connected_clients(&profile).await {
+        Ok(count) => {
+            connected_clients = Some(count);
+            connections_source = "st_client";
+        }
+        Err(error) => connections_note = Some(error),
+    }
+
+    if connected_clients.is_none() {
+        if let Ok(Some(metrics)) = metrics.as_ref() {
+            if let Some(count) = metrics.connected_clients {
+                connected_clients = Some(count);
+                connections_source = "metrics";
+                connections_note = None;
+            }
+        }
+    }
+
+    let mut sizes_source = "unavailable";
+    let mut sizes_note = None;
+    let mut blob_store_bytes = None;
+    let mut tables = Vec::new();
+
+    if let Ok(Some(metrics)) = metrics.as_ref() {
+        if !metrics.row_bytes.is_empty() {
+            tables = schema
+                .tables
+                .iter()
+                .map(|table| TableSizeSummary {
+                    row_count: metrics.row_counts.get(&table.name).copied(),
+                    row_bytes: metrics.row_bytes.get(&table.name).copied().unwrap_or(0),
+                    index_bytes: metrics.index_bytes.get(&table.name).copied().unwrap_or(0),
+                    name: table.name.clone(),
+                })
+                .collect();
+            sizes_source = "metrics";
+            blob_store_bytes = metrics.blob_store_bytes;
+        }
+    }
+
+    if tables.is_empty() && !schema.tables.is_empty() {
+        let counts = count_rows_per_table(&profile, &schema.tables).await;
+
+        if counts.iter().any(Option::is_some) {
+            tables = schema
+                .tables
+                .iter()
+                .zip(counts)
+                .map(|(table, row_count)| TableSizeSummary {
+                    row_count,
+                    row_bytes: row_count
+                        .unwrap_or(0)
+                        .saturating_mul(estimated_row_bytes(&table.columns)),
+                    index_bytes: 0,
+                    name: table.name.clone(),
+                })
+                .collect();
+            sizes_source = "estimate";
+        }
+
+        sizes_note = Some(match metrics {
+            Ok(_) => "This host reports no data size metrics for the database, so sizes are estimated from row counts and column types.".to_string(),
+            Err(error) => format!(
+                "Exact sizes need the host's /v1/metrics endpoint ({error}), so sizes are estimated from row counts and column types."
+            ),
+        });
+    }
+
+    tables.sort_by(|left, right| {
+        (right.row_bytes + right.index_bytes)
+            .cmp(&(left.row_bytes + left.index_bytes))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+
+    Ok(DatabaseOverview {
+        database_identity,
+        connected_clients,
+        connections_source: connections_source.to_string(),
+        connections_note,
+        tables,
+        sizes_source: sizes_source.to_string(),
+        sizes_note,
+        blob_store_bytes,
+    })
+}
+
 #[tauri::command]
 pub async fn get_logs(
     state: tauri::State<'_, AppState>,
@@ -1116,6 +1589,98 @@ mod tests {
         assert_eq!(
             mutation_predicate(&table, &row).unwrap_err(),
             "Only scalar values can be used in generic SQL mutations"
+        );
+    }
+
+    const METRICS_SAMPLE: &str = concat!(
+        "# HELP spacetime_data_size_bytes_used_by_rows The number of bytes used by rows\n",
+        "# TYPE spacetime_data_size_bytes_used_by_rows gauge\n",
+        "spacetime_data_size_bytes_used_by_rows{db=\"AB12\",table_name=\"players\"} 4096\n",
+        "spacetime_data_size_bytes_used_by_rows{db=\"ab12\",table_name=\"st_table\"} 512\n",
+        "spacetime_data_size_bytes_used_by_rows{db=\"ffff\",table_name=\"players\"} 999999\n",
+        "spacetime_data_size_bytes_used_by_rows_total{db=\"ab12\",table_name=\"players\"} 7\n",
+        "spacetime_data_size_table_bytes_used_by_index_keys{db=\"ab12\",table_name=\"players\"} 128\n",
+        "spacetime_data_size_table_num_rows{db=\"ab12\",table_name=\"players\"} 42\n",
+        "spacetime_data_size_blob_store_bytes_used_by_blobs{db=\"ab12\"} 2048\n",
+        "spacetime_worker_connected_clients{database_identity=\"ab12\"} 3\n",
+        "spacetime_worker_connected_clients{database_identity=\"ffff\"} 77\n",
+    );
+
+    #[test]
+    fn read_database_metrics_collects_every_gauge_in_one_pass() {
+        let metrics = read_database_metrics(METRICS_SAMPLE, "0xAB12");
+
+        assert_eq!(metrics.connected_clients, Some(3));
+        assert_eq!(metrics.blob_store_bytes, Some(2048));
+        assert_eq!(metrics.row_bytes.get("players"), Some(&4096));
+        assert_eq!(metrics.row_bytes.get("st_table"), Some(&512));
+        assert_eq!(metrics.index_bytes.get("players"), Some(&128));
+        assert_eq!(metrics.row_counts.get("players"), Some(&42));
+    }
+
+    #[test]
+    fn read_database_metrics_keeps_only_the_requested_database() {
+        let metrics = read_database_metrics(METRICS_SAMPLE, "ab12");
+
+        // `players` also exists on database `ffff` with a much larger size.
+        assert_eq!(metrics.row_bytes.get("players"), Some(&4096));
+        assert_eq!(metrics.row_bytes.len(), 2);
+
+        let other = read_database_metrics(METRICS_SAMPLE, "cd34");
+        assert_eq!(other, DatabaseMetrics::default());
+    }
+
+    #[test]
+    fn read_database_metrics_ignores_a_longer_metric_with_the_same_prefix() {
+        // `..._by_rows_total` must not be mistaken for `..._by_rows`.
+        let metrics = read_database_metrics(METRICS_SAMPLE, "ab12");
+
+        assert!(metrics.row_bytes.values().all(|bytes| *bytes != 7));
+    }
+
+    #[test]
+    fn read_database_metrics_keeps_separators_inside_a_quoted_label() {
+        let line = "spacetime_data_size_bytes_used_by_rows{db=\"ab12\",table_name=\"a,b}c\"} 8";
+        let metrics = read_database_metrics(line, "ab12");
+
+        assert_eq!(metrics.row_bytes.get("a,b}c"), Some(&8));
+    }
+
+    #[test]
+    fn read_database_metrics_skips_a_gauge_with_no_identity_label() {
+        let metrics = read_database_metrics("spacetime_worker_connected_clients 9", "ab12");
+
+        assert_eq!(metrics.connected_clients, None);
+    }
+
+    #[test]
+    fn statement_row_count_accepts_numbers_and_strings() {
+        assert_eq!(
+            statement_row_count(&json!({ "rows": [[12]] })),
+            Some(12)
+        );
+        assert_eq!(
+            statement_row_count(&json!({ "rows": [["18446744073709551615"]] })),
+            Some(u64::MAX)
+        );
+        assert_eq!(statement_row_count(&json!({ "rows": [] })), None);
+    }
+
+    #[test]
+    fn estimated_row_bytes_is_never_zero() {
+        assert_eq!(estimated_row_bytes(&[]), 1);
+        assert_eq!(
+            estimated_row_bytes(&[
+                ColumnSummary {
+                    name: "id".to_string(),
+                    r#type: "U64".to_string(),
+                },
+                ColumnSummary {
+                    name: "name".to_string(),
+                    r#type: "String".to_string(),
+                },
+            ]),
+            40
         );
     }
 

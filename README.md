@@ -10,6 +10,7 @@ Windows builds are available from the GitHub Releases page. macOS and Linux buil
 
 - Save connection profiles for local or hosted SpacetimeDB databases.
 - Store bearer tokens in the operating system keychain instead of the frontend.
+- See how many clients are connected right now and how much space each table uses.
 - Inspect tables, columns, access modes, and primary keys from the database schema.
 - Browse table rows with pagination.
 - Create, update, and delete rows through the table UI.
@@ -118,12 +119,28 @@ Connection profile metadata is stored locally by the app. Bearer tokens are stor
 
 Use the main navigation to move between the available workspace views:
 
-- **Overview** shows the currently selected connection.
+- **Connections** manages connection profiles and selects the active one.
+- **Overview** shows the current client connection count and a breakdown of how many
+  megabytes each table is using.
 - **Tables** shows the schema, table rows, row editing controls, and raw SQL runner.
 - **Functions** lists reducers, lifecycle functions, and their parameters.
 - **Logs** shows recent database logs and can refresh automatically.
 
 Some operations require database permissions. If a request fails with an authorization error, update the connection profile with a token that has the needed access.
+
+### Where The Overview Numbers Come From
+
+The Overview page reads whichever source the host makes available and says which one
+it used, so an estimate is never presented as an exact figure.
+
+- **Connections** come from the `st_client` system table, which needs a token with
+  owner access. When that read is refused, the page falls back to the host's
+  `spacetime_worker_connected_clients` gauge.
+- **Table sizes** come from the host's Prometheus endpoint at `/v1/metrics`, which
+  reports the exact bytes used by each table's rows and index keys. Hosts that do not
+  expose that endpoint - Maincloud among them - fall back to an estimate calculated
+  from `SELECT count(*)` per table and the width of each column's type. The page
+  labels estimated sizes and explains why the exact numbers were unavailable.
 
 ## Build Commands
 

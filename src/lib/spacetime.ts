@@ -45,6 +45,24 @@ export type TablePage = {
   pageSize: number;
 };
 
+export type TableSizeSummary = {
+  name: string;
+  rowCount?: number | null;
+  rowBytes: number;
+  indexBytes: number;
+};
+
+export type DatabaseOverview = {
+  databaseIdentity?: string | null;
+  connectedClients?: number | null;
+  connectionsSource: "st_client" | "metrics" | "unavailable";
+  connectionsNote?: string | null;
+  tables: TableSizeSummary[];
+  sizesSource: "metrics" | "estimate" | "unavailable";
+  sizesNote?: string | null;
+  blobStoreBytes?: number | null;
+};
+
 export type TestConnectionResult = {
   ok: boolean;
   identity?: string | null;
@@ -103,6 +121,10 @@ export function testConnection(input: {
 
 export function getSchema(connectionId: string) {
   return invoke<SchemaSummary>("get_schema", { connectionId });
+}
+
+export function getOverview(connectionId: string) {
+  return invoke<DatabaseOverview>("get_overview", { connectionId });
 }
 
 export function queryTable(

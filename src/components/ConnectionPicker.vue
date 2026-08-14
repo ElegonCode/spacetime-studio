@@ -1,20 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import {
-  clearSelectedConnectionId,
   deleteConnection,
-  getSelectedConnectionId,
-  listConnections,
   saveConnection,
-  setSelectedConnectionId,
   testConnection,
   type ConnectionProfile,
 } from "../lib/spacetime";
+import { useConnections } from "../lib/connectionStore";
 import { clearPageRefreshHandler, setPageRefreshHandler } from "../lib/pageActions";
-
-const emit = defineEmits<{
-  changed: [connection: ConnectionProfile | null];
-}>();
 
 const MAINCLOUD_URL = "https://maincloud.spacetimedb.com";
 const LOCALHOST_URL = "http://localhost:3000";
@@ -27,9 +20,8 @@ const hostModeOptions = [
 
 type HostMode = "local" | "maincloud" | "custom";
 
-const connections = ref<ConnectionProfile[]>([]);
-const selectedId = ref<string | undefined>(getSelectedConnectionId() ?? undefined);
-const loading = ref(false);
+const { connections, selectedId, loading, loadConnections, selectConnection } =
+  useConnections();
 const saving = ref(false);
 const testing = ref(false);
 const deleting = ref(false);
@@ -46,10 +38,6 @@ const form = ref({
   token: "",
 });
 const hostMode = ref<HostMode>("local");
-
-const selectedConnection = computed(
-  () => connections.value.find((connection) => connection.id === selectedId.value) ?? null,
-);
 
 const isEditing = computed(() => Boolean(form.value.id));
 
@@ -100,37 +88,12 @@ function resetForm() {
 }
 
 async function load() {
-  loading.value = true;
   error.value = "";
-
   try {
-    connections.value = await listConnections();
-
-    // The stored id can point at a profile that no longer exists, which used to leave
-    // the picker stuck on a connection it could not resolve.
-    if (!connections.value.some((connection) => connection.id === selectedId.value)) {
-      selectedId.value = connections.value[0]?.id;
-      if (selectedId.value) {
-        setSelectedConnectionId(selectedId.value);
-      } else {
-        clearSelectedConnectionId();
-      }
-    }
-
-    emit("changed", selectedConnection.value);
+    await loadConnections();
   } catch (err) {
     error.value = String(err);
-  } finally {
-    loading.value = false;
   }
-}
-
-function activate(connection: ConnectionProfile) {
-  selectedId.value = connection.id;
-  setSelectedConnectionId(connection.id);
-  error.value = "";
-  status.value = "";
-  emit("changed", selectedConnection.value);
 }
 
 function editConnection(connection: ConnectionProfile) {
@@ -162,6 +125,7 @@ async function save() {
   status.value = "";
 
   try {
+    const wasNew = !form.value.id;
     const connection = await saveConnection({
       id: form.value.id || undefined,
       name: form.value.name,
@@ -169,11 +133,13 @@ async function save() {
       database: form.value.database,
       token: form.value.token || undefined,
     });
-    const wasNew = !form.value.id;
     form.value.id = connection.id;
     form.value.token = "";
-    selectedId.value = connection.id;
-    setSelectedConnectionId(connection.id);
+    // Adding a connection makes it the active one so the workspace unlocks
+    // immediately; editing leaves the current selection untouched.
+    if (wasNew) {
+      selectConnection(connection.id);
+    }
     editorOpen.value = false;
     await load();
     status.value = wasNew
@@ -222,10 +188,6 @@ async function confirmDelete() {
 
   try {
     await deleteConnection(connection.id);
-    if (selectedId.value === connection.id) {
-      clearSelectedConnectionId();
-      selectedId.value = undefined;
-    }
     pendingDelete.value = null;
     await load();
     status.value = `Removed ${connection.name}.`;
@@ -251,7 +213,9 @@ onUnmounted(() => {
     <div class="mb-4 flex items-center justify-between gap-3">
       <div>
         <h2 class="text-base font-semibold text-highlighted">Connections</h2>
-        <p class="text-xs text-muted">Select the connection the workspace should use.</p>
+        <p class="text-xs text-muted">
+          Add and edit your SpacetimeDB profiles. Pick the active one from the sidebar.
+        </p>
       </div>
       <UButton icon="i-lucide-plus" size="sm" @click="newConnection">New</UButton>
     </div>
@@ -273,39 +237,18 @@ onUnmounted(() => {
       </UButton>
     </div>
 
-    <ul v-else class="space-y-2" role="radiogroup" aria-label="Active connection">
+    <ul v-else class="space-y-2">
       <li
         v-for="connection in connections"
         :key="connection.id"
-        class="flex items-stretch gap-1 rounded-lg border transition-colors"
-        :class="
-          connection.id === selectedId
-            ? 'border-primary bg-primary/5'
-            : 'border-default hover:bg-elevated/50'
-        "
+        class="flex items-stretch gap-1 rounded-lg border border-default"
       >
-        <button
-          type="button"
-          role="radio"
-          :aria-checked="connection.id === selectedId"
-          class="flex min-w-0 flex-1 items-center gap-3 rounded-l-lg px-3 py-2.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          @click="activate(connection)"
-        >
-          <UIcon
-            :name="
-              connection.id === selectedId ? 'i-lucide-circle-check' : 'i-lucide-circle'
-            "
-            class="size-4 shrink-0"
-            :class="connection.id === selectedId ? 'text-primary' : 'text-muted'"
-          />
+        <div class="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5">
           <span class="min-w-0 flex-1">
             <span class="flex items-center gap-2">
               <span class="truncate text-sm font-medium text-highlighted">
                 {{ connection.name }}
               </span>
-              <UBadge v-if="connection.id === selectedId" size="sm" variant="subtle">
-                Active
-              </UBadge>
             </span>
             <span class="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
               <span class="truncate">{{ connection.database }}</span>
@@ -325,7 +268,7 @@ onUnmounted(() => {
               </span>
             </span>
           </span>
-        </button>
+        </div>
 
         <div class="flex shrink-0 items-center gap-1 pr-2">
           <UButton
@@ -395,7 +338,7 @@ onUnmounted(() => {
           <UFormField v-else label="Host URL">
             <UInput :model-value="selectedBaseUrl" class="w-full" disabled />
           </UFormField>
-          <UFormField label="Auth token" :help="tokenHelp">
+          <UFormField label="Auth token">
             <UInput
               v-model="form.token"
               class="w-full"
@@ -407,6 +350,13 @@ onUnmounted(() => {
               "
             />
           </UFormField>
+
+          <UAlert
+            color="neutral"
+            variant="subtle"
+            icon="i-lucide-info"
+            :description="tokenHelp"
+          />
 
           <UAlert v-if="error" color="error" variant="subtle" :description="error" />
           <UAlert v-if="status" color="success" variant="subtle" :description="status" />
