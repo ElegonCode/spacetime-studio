@@ -123,12 +123,9 @@ pub struct TableSizeSummary {
 pub struct DatabaseOverview {
     pub database_identity: Option<String>,
     pub connected_clients: Option<u64>,
-    /// `st_client`, `metrics`, or `unavailable` - the frontend explains how the
-    /// number was obtained so an estimate is never read as an exact figure.
     pub connections_source: String,
     pub connections_note: Option<String>,
     pub tables: Vec<TableSizeSummary>,
-    /// `metrics`, `estimate`, or `unavailable`.
     pub sizes_source: String,
     pub sizes_note: Option<String>,
     pub blob_store_bytes: Option<u64>,
@@ -177,8 +174,6 @@ fn normalize_url(url: &str) -> String {
         return trimmed.to_string();
     }
 
-    // Hosting providers hand out bare domains such as `my-app.up.railway.app`.
-    // reqwest rejects those, so assume the scheme the host most likely serves.
     let authority = trimmed.split('/').next().unwrap_or(trimmed);
     let host = authority
         .rsplit_once(':')
@@ -263,7 +258,6 @@ fn is_sql_literal_value(value: &Value) -> bool {
     matches!(value, Value::Bool(_) | Value::Number(_) | Value::String(_))
 }
 
-/// Splits on `separator`, ignoring separators inside a double-quoted label value.
 fn split_outside_quotes(text: &str, separator: char) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut start = 0;
@@ -287,7 +281,6 @@ fn split_outside_quotes(text: &str, separator: char) -> Vec<&str> {
     parts
 }
 
-/// Index of the `}` that closes a label block, skipping any `}` inside a quoted value.
 fn label_block_end(text: &str) -> Option<usize> {
     let mut in_quotes = false;
     let mut escaped = false;
@@ -343,8 +336,6 @@ fn parse_labels(block: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Splits an exposition line into its metric name and everything after it, so a
-/// caller can reject a line by name before paying to parse its labels.
 fn split_metric_name(line: &str) -> Option<(&str, &str)> {
     let line = line.trim();
 
@@ -407,9 +398,6 @@ enum Gauge {
     BlobStoreBytes,
 }
 
-/// Reads every gauge the overview needs in one pass. The exposition body covers
-/// the whole node rather than a single database, so it can be large on a busy
-/// host - lines are rejected by metric name before their labels are parsed.
 fn read_database_metrics(text: &str, database_identity: &str) -> DatabaseMetrics {
     let wanted = strip_identity_prefix(database_identity);
     let mut metrics = DatabaseMetrics::default();
@@ -438,8 +426,6 @@ fn read_database_metrics(text: &str, database_identity: &str) -> DatabaseMetrics
                 .map(|(_, value)| value.as_str())
         };
 
-        // Data size metrics label the database `db`; worker metrics use
-        // `database_identity` for the same thing.
         let belongs_to_database = label("db")
             .or_else(|| label("database_identity"))
             .is_some_and(|identity| identity_matches(identity, wanted));
@@ -474,9 +460,6 @@ fn read_database_metrics(text: &str, database_identity: &str) -> DatabaseMetrics
     metrics
 }
 
-/// Rough on-disk width of one row, used only when the metrics endpoint is out of
-/// reach. Variable-length values live outside the row, so those are an average
-/// rather than a measurement.
 fn estimated_column_bytes(column_type: &str) -> u64 {
     match column_type.to_ascii_lowercase().as_str() {
         "bool" | "i8" | "u8" => 1,
@@ -498,8 +481,6 @@ fn estimated_row_bytes(columns: &[ColumnSummary]) -> u64 {
         .max(1)
 }
 
-/// Pulls the row count out of one `SELECT count(*)` statement result. Large
-/// integers can arrive as JSON strings, so both shapes are accepted.
 fn statement_row_count(statement: &Value) -> Option<u64> {
     let cell = match statement.get("rows")?.as_array()?.first()? {
         Value::Array(values) => values.first()?,
@@ -511,9 +492,6 @@ fn statement_row_count(statement: &Value) -> Option<u64> {
         .or_else(|| cell.as_f64().map(gauge_to_u64))
 }
 
-/// Builds an id that cannot collide with a profile that already exists. A bare
-/// millisecond timestamp collides when two saves land in the same millisecond, and a
-/// collision silently overwrites the earlier profile instead of adding a new one.
 fn new_connection_id(existing: &[ConnectionProfile], now: u64) -> String {
     let mut candidate = format!("conn-{now}");
     let mut suffix = 1u32;
@@ -1040,6 +1018,7 @@ pub async fn test_connection(
     let ping_url = format!("{}/v1/ping", profile.base_url);
     let ping = client()?
         .get(ping_url)
+        .timeout(std::time::Duration::from_secs(5))
         .send()
         .await
         .map_err(|error| format!("Could not reach SpacetimeDB host: {error}"))?;
@@ -1271,8 +1250,6 @@ async fn count_connected_clients(profile: &ConnectionProfile) -> Result<u64, Str
         .ok_or_else(|| "st_client did not return a row count".to_string())
 }
 
-/// Counts every table in one round trip, falling back to one request per table so
-/// that a single unreadable table does not blank out the whole page.
 async fn count_rows_per_table(
     profile: &ConnectionProfile,
     tables: &[TableSummary],
@@ -1336,9 +1313,6 @@ pub async fn get_overview(
             .map(str::to_string)
     });
 
-    // Node metrics are exact but usually only reachable on a host you run
-    // yourself; SQL against the database works anywhere the token allows it.
-    // Both are keyed by database identity, so neither is usable without it.
     let metrics_body = get_text(&profile, "/v1/metrics").await;
     let metrics = match (metrics_body.as_deref(), database_identity.as_deref()) {
         (Ok(text), Some(identity)) => Ok(Some(read_database_metrics(text, identity))),
@@ -1622,7 +1596,6 @@ mod tests {
     fn read_database_metrics_keeps_only_the_requested_database() {
         let metrics = read_database_metrics(METRICS_SAMPLE, "ab12");
 
-        // `players` also exists on database `ffff` with a much larger size.
         assert_eq!(metrics.row_bytes.get("players"), Some(&4096));
         assert_eq!(metrics.row_bytes.len(), 2);
 
@@ -1632,7 +1605,6 @@ mod tests {
 
     #[test]
     fn read_database_metrics_ignores_a_longer_metric_with_the_same_prefix() {
-        // `..._by_rows_total` must not be mistaken for `..._by_rows`.
         let metrics = read_database_metrics(METRICS_SAMPLE, "ab12");
 
         assert!(metrics.row_bytes.values().all(|bytes| *bytes != 7));

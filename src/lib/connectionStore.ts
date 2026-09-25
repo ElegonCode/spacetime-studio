@@ -25,6 +25,15 @@ const loadError = ref("");
 const status = ref<ConnectionStatus>(selectedId.value ? "checking" : "idle");
 const statusMessage = ref("");
 
+// Last known reachability of every saved profile, not just the active one, so
+// the sidebar picker can show which servers are online before switching.
+export type Reachability = { status: ConnectionStatus; message: string };
+const reachability = ref<Record<string, Reachability>>({});
+
+function setReachability(id: string, next: Reachability) {
+  reachability.value = { ...reachability.value, [id]: next };
+}
+
 const selectedConnection = computed(
   () => connections.value.find((connection) => connection.id === selectedId.value) ?? null,
 );
@@ -32,11 +41,16 @@ const selectedConnection = computed(
 // The green-dot state: true only once a connection test has actually succeeded.
 const isConnected = computed(() => status.value === "connected");
 
-// The navigation gate. Kept permissive while a check is in flight so a reload
-// on, say, the tables page is not bounced to the connections page mid-check;
-// only a confirmed failure or no selection at all locks the rest of the app.
+// Whether the active selection's most recent completed check failed. Unlike
+// status, it survives a re-check in flight, so re-pinging a broken connection
+// does not briefly unlock the workspace. Cleared when the selection changes.
+const lastCheckFailed = ref(false);
+
+// The navigation gate. Kept permissive while the first check of a selection is
+// in flight so a reload on, say, the tables page is not bounced to the landing
+// page mid-check; only a confirmed failure or no selection at all locks the app.
 const canAccess = computed(
-  () => selectedId.value !== null && status.value !== "error",
+  () => selectedId.value !== null && !lastCheckFailed.value,
 );
 
 // Guards against an earlier, slower check overwriting the result of a newer one.
@@ -48,26 +62,52 @@ async function checkConnection() {
   if (!id || !connections.value.some((connection) => connection.id === id)) {
     status.value = "idle";
     statusMessage.value = "";
+    lastCheckFailed.value = false;
     return;
   }
 
   const token = ++checkToken;
   status.value = "checking";
-  statusMessage.value = "";
+  setReachability(id, { status: "checking", message: "" });
 
+  const result = await probe(id);
+  if (token !== checkToken) return;
+  setReachability(id, result);
+  status.value = result.status;
+  statusMessage.value = result.message;
+  lastCheckFailed.value = result.status === "error";
+}
+
+async function probe(id: string): Promise<Reachability> {
   try {
     const result = await testConnection({ id });
-    if (token !== checkToken) return;
-    status.value = result.ok ? "connected" : "error";
-    statusMessage.value = result.message;
+    return { status: result.ok ? "connected" : "error", message: result.message };
   } catch (err) {
-    if (token !== checkToken) return;
-    status.value = "error";
-    statusMessage.value = String(err);
+    return { status: "error", message: String(err) };
   }
 }
 
+// Ping every saved profile in parallel. The active one goes through
+// checkConnection so the workspace gate stays in sync with what the list shows.
+let pingToken = 0;
+
+async function pingAll() {
+  const token = ++pingToken;
+  await Promise.all(
+    connections.value.map(async ({ id }) => {
+      if (id === selectedId.value) return checkConnection();
+      setReachability(id, { status: "checking", message: "" });
+      const result = await probe(id);
+      if (token === pingToken) setReachability(id, result);
+    }),
+  );
+}
+
 function selectConnection(id: string | null) {
+  if (id !== selectedId.value) {
+    lastCheckFailed.value = false;
+    statusMessage.value = "";
+  }
   selectedId.value = id;
   if (id) {
     setSelectedConnectionId(id);
@@ -83,6 +123,11 @@ async function loadConnections() {
 
   try {
     connections.value = await listConnections();
+
+    const ids = new Set(connections.value.map((connection) => connection.id));
+    reachability.value = Object.fromEntries(
+      Object.entries(reachability.value).filter(([id]) => ids.has(id)),
+    );
 
     // The stored id can point at a profile that no longer exists, which would
     // otherwise leave the workspace pinned to a connection it cannot resolve.
@@ -109,9 +154,12 @@ export function useConnections() {
     statusMessage,
     isConnected,
     canAccess,
+    lastCheckFailed,
     loading,
     loadError,
+    reachability,
     loadConnections,
+    pingAll,
     selectConnection,
     checkConnection,
   };

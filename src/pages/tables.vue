@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { TabsItem } from "@nuxt/ui";
+import type { TableColumn, TabsItem } from "@nuxt/ui";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   createRow,
@@ -19,6 +19,11 @@ import {
   clearPageRefreshHandler,
   setPageRefreshHandler,
 } from "../lib/pageActions";
+import { dataTableUi } from "../lib/tableUi";
+import { useConnections } from "../lib/connectionStore";
+import ConnectionEmptyState from "../components/ConnectionEmptyState.vue";
+
+const { canAccess, loadConnections } = useConnections();
 
 const connectionId = ref<string | null>(getSelectedConnectionId());
 const schema = ref<SchemaSummary | null>(null);
@@ -49,23 +54,78 @@ const filteredTables = computed(() => {
     table.name.toLowerCase().includes(search),
   );
 });
-const tableItems = computed<TabsItem[]>(() =>
-  filteredTables.value.map((table) => {
-    const isPrivate = table.access.toLowerCase() === "private";
+function isPrivateTable(table: TableSummary) {
+  return table.access.toLowerCase() === "private";
+}
 
-    return {
-      label: table.name,
-      value: table.name,
-      icon: isPrivate ? "i-lucide-lock" : "i-lucide-table",
-      ui: isPrivate ? { leadingIcon: "text-error" } : undefined,
-    };
-  }),
+function toTabItem(table: TableSummary): TabsItem {
+
+  return {
+    label: table.name,
+    value: table.name,
+    icon: "i-lucide-table"
+  };
+}
+
+// Private tables are listed first, each group under its own heading. Groups
+// with no matching tables are left out.
+const tableSections = computed(() =>
+  [
+    {
+      label: "Private",
+      items: filteredTables.value.filter(isPrivateTable).map(toTabItem),
+    },
+    {
+      label: "Public",
+      items: filteredTables.value
+        .filter((table) => !isPrivateTable(table))
+        .map(toTabItem),
+    },
+  ].filter((section) => section.items.length),
 );
+// Sections start expanded; this tracks the ones the user has folded away.
+const collapsedSections = ref<Record<string, boolean>>({});
 const selectedTable = computed<TableSummary | null>(
   () =>
     tables.value.find((table) => table.name === selectedTableName.value) ??
     null,
 );
+
+type Row = Record<string, unknown>;
+
+// Cells use separate borders so they stay attached to the sticky header. The
+// last data column drops its right border because the pinned Actions column
+// already draws one on its left.
+const rowColumns = computed<TableColumn<Row>[]>(() => {
+  const columns = tablePage.value?.columns ?? [];
+
+  return [
+    ...columns.map<TableColumn<Row>>((column, index) => {
+      const edge = index === columns.length - 1 ? "" : "border-r";
+
+      return {
+        id: column.name,
+        accessorFn: (row) => row[column.name],
+        meta: {
+          class: {
+            th: `whitespace-nowrap ${edge} border-default`,
+            td: `min-w-40 ${edge} border-default/60 align-top`,
+          },
+        },
+      };
+    }),
+    {
+      id: "actions",
+      header: "Actions",
+      meta: {
+        class: {
+          th: "w-28 text-right",
+          td: "whitespace-nowrap text-right align-top",
+        },
+      },
+    },
+  ];
+});
 
 function defaultRow(table: TableSummary) {
   return Object.fromEntries(
@@ -131,10 +191,19 @@ function setBooleanField(columnName: string, value: boolean | "indeterminate") {
   rowForm.value[columnName] = value === true;
 }
 
+function clearSchema() {
+  schema.value = null;
+  tablePage.value = null;
+  selectedTableName.value = "";
+  error.value = "";
+  status.value = "";
+}
+
 async function loadSchema() {
   connectionId.value = getSelectedConnectionId();
-  if (!connectionId.value) {
-    error.value = "Select or create a connection first.";
+  // Without a usable connection the page stays empty rather than erroring.
+  if (!connectionId.value || !canAccess.value) {
+    clearSchema();
     return;
   }
 
@@ -142,10 +211,20 @@ async function loadSchema() {
   error.value = "";
 
   try {
-    schema.value = await getSchema(connectionId.value);
-    selectedTableName.value =
-      selectedTableName.value || schema.value.tables[0]?.name || "";
-    if (selectedTableName.value) await loadRows();
+    const loaded = await getSchema(connectionId.value);
+    schema.value = loaded;
+    // Keep the open table across refreshes, but fall back to the first one
+    // when it does not exist in this (possibly different) database.
+    const keep = loaded.tables.some(
+      (table) => table.name === selectedTableName.value,
+    );
+    const previous = selectedTableName.value;
+    selectedTableName.value = keep
+      ? previous
+      : (loaded.tables[0]?.name ?? "");
+    // The watcher on selectedTableName loads rows when the name changes.
+    if (selectedTableName.value && selectedTableName.value === previous)
+      await loadRows();
   } catch (err) {
     error.value = String(err);
   } finally {
@@ -273,13 +352,25 @@ watch(pageSize, () => {
   loadRows();
 });
 
+// With no usable connection there is no schema to reload, so the refresh button
+// re-checks the saved connections instead.
+async function refresh() {
+  if (canAccess.value) {
+    await loadSchema();
+  } else {
+    await loadConnections().catch(() => {});
+  }
+}
+
+watch(canAccess, () => loadSchema());
+
 onMounted(() => {
   loadSchema();
-  setPageRefreshHandler(loadSchema);
+  setPageRefreshHandler(refresh);
 });
 
 onUnmounted(() => {
-  clearPageRefreshHandler(loadSchema);
+  clearPageRefreshHandler(refresh);
 });
 </script>
 
@@ -313,28 +404,66 @@ onUnmounted(() => {
         </div>
         <div class="min-h-0 flex-1 overflow-y-auto">
           <p
-            v-if="!tableItems.length"
+            v-if="!tableSections.length"
             class="mx-2 rounded-md border border-default bg-default/20 px-3 py-2 text-sm text-muted"
           >
             No tables found.
           </p>
-          <UTabs
-            v-else
-            v-model="selectedTableName"
-            orientation="vertical"
-            variant="pill"
-            :content="false"
-            :items="tableItems"
-            class="w-full"
-            :ui="{
-              list: 'items-start bg-opacity-0 w-full',
-              trigger: 'w-full',
-            }"
-          />
+          <UCollapsible
+            v-for="section in tableSections"
+            :key="section.label"
+            :open="!collapsedSections[section.label]"
+            class="mb-3"
+            @update:open="collapsedSections[section.label] = !$event"
+          >
+            <button
+              type="button"
+              class="group flex w-full items-center gap-1 px-3 pt-1 pb-1 text-xs font-medium text-muted select-none hover:text-highlighted"
+            >
+              <UIcon
+                name="i-lucide-chevron-down"
+                class="size-3.5 transition-transform group-data-[state=closed]:-rotate-90"
+              />
+              {{ section.label }}
+              <span class="font-normal text-dimmed">
+                ({{ section.items.length }})
+              </span>
+            </button>
+
+            <template #content>
+              <UTabs
+                v-model="selectedTableName"
+                orientation="vertical"
+                variant="pill"
+                :content="false"
+                :items="section.items"
+                class="w-full"
+                :ui="{
+                  list: 'items-start bg-opacity-0 w-full',
+                  trigger: 'w-full',
+                  // Each section is its own tab list, so hide the pill in the
+                  // ones that do not hold the selected table.
+                  indicator: section.items.some(
+                    (item) => item.value === selectedTableName,
+                  )
+                    ? undefined
+                    : 'hidden',
+                }"
+              />
+            </template>
+          </UCollapsible>
         </div>
       </aside>
 
       <section
+        v-if="!canAccess"
+        class="min-h-0 min-w-0 border-l border-default bg-default/30"
+      >
+        <ConnectionEmptyState />
+      </section>
+
+      <section
+        v-else
         class="min-h-0 min-w-0 flex flex-col border-l border-default bg-default/30"
       >
         <div
@@ -408,82 +537,70 @@ onUnmounted(() => {
           </form>
         </div>
 
-        <div class="min-h-0 flex-1 overflow-auto">
-          <table class="min-w-full text-sm">
-            <thead class="bg-default/60">
-              <tr>
-                <th
-                  v-for="column in tablePage?.columns ?? []"
-                  :key="column.name"
-                  class="whitespace-nowrap border-b border-r border-default px-3 py-2 text-left text-xs font-medium text-muted"
-                >
-                  {{ column.name }}
-                  <span class="font-normal">({{ column.type }})</span>
-                </th>
-                <th
-                  class="sticky right-0 z-20 w-28 border-b border-l border-default bg-default/95 px-3 py-2 text-right text-xs font-medium text-muted shadow-[-12px_0_18px_-18px_rgba(0,0,0,0.9)]"
-                >
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="(row, rowIndex) in tablePage?.rows ?? []"
-                :key="rowIndex"
-                class="border-b border-default/60"
-              >
-                <td
-                  v-for="column in tablePage?.columns ?? []"
-                  :key="column.name"
-                  class="min-w-40 border-r border-default/60 px-3 py-2 align-top"
-                >
-                  <input
-                    class="w-full rounded border border-transparent bg-transparent px-2 py-1 text-highlighted outline-none focus:border-primary focus:bg-default"
-                    :value="stringifyCell(row[column.name])"
-                    @change="
-                      updateCell(
-                        row,
-                        column.name,
-                        ($event.target as HTMLInputElement).value,
-                      )
-                    "
-                  />
-                </td>
-                <td
-                  class="sticky right-0 z-10 whitespace-nowrap border-l border-default/60 bg-default/95 px-3 py-2 text-right align-top shadow-[-12px_0_18px_-18px_rgba(0,0,0,0.9)]"
-                >
-                  <UButton
-                    icon="i-lucide-save"
-                    size="xs"
-                    variant="ghost"
-                    aria-label="Save row"
-                    @click="
-                      editRow(row);
-                      saveRow();
-                    "
-                  />
-                  <UButton
-                    icon="i-lucide-file-pen-line"
-                    size="xs"
-                    color="neutral"
-                    variant="ghost"
-                    aria-label="Edit JSON"
-                    @click="editRow(row)"
-                  />
-                  <UButton
-                    icon="i-lucide-trash-2"
-                    size="xs"
-                    color="error"
-                    variant="ghost"
-                    aria-label="Delete row"
-                    @click="deleteRow(row)"
-                  />
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <UTable
+          :data="tablePage?.rows ?? []"
+          :columns="rowColumns"
+          sticky="header"
+          :column-pinning="{ right: ['actions'] }"
+          class="min-h-0 flex-1"
+          :ui="{ ...dataTableUi, empty: 'hidden' }"
+        >
+          <template
+            v-for="column in tablePage?.columns ?? []"
+            :key="column.name"
+            #[`${column.name}-header`]
+          >
+            {{ column.name }}
+            <span class="font-normal">({{ column.type }})</span>
+          </template>
+
+          <template
+            v-for="column in tablePage?.columns ?? []"
+            :key="column.name"
+            #[`${column.name}-cell`]="{ row }"
+          >
+            <input
+              class="w-full rounded border border-transparent bg-transparent px-2 py-1 text-highlighted outline-none focus:border-primary focus:bg-default"
+              :value="stringifyCell(row.original[column.name])"
+              @change="
+                updateCell(
+                  row.original,
+                  column.name,
+                  ($event.target as HTMLInputElement).value,
+                )
+              "
+            />
+          </template>
+
+          <template #actions-cell="{ row }">
+            <UButton
+              icon="i-lucide-save"
+              size="xs"
+              variant="ghost"
+              aria-label="Save row"
+              @click="
+                editRow(row.original);
+                saveRow();
+              "
+            />
+            <UButton
+              icon="i-lucide-file-pen-line"
+              size="xs"
+              color="neutral"
+              variant="ghost"
+              aria-label="Edit JSON"
+              @click="editRow(row.original)"
+            />
+            <UButton
+              icon="i-lucide-trash-2"
+              size="xs"
+              color="error"
+              variant="ghost"
+              aria-label="Delete row"
+              @click="deleteRow(row.original)"
+            />
+          </template>
+        </UTable>
       </section>
     </div>
 

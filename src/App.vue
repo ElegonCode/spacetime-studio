@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import type { NavigationMenuItem, SelectItem } from "@nuxt/ui";
+import type { NavigationMenuItem } from "@nuxt/ui";
 import { useRoute, useRouter } from "vue-router";
 import {
   pageRefreshHandler,
@@ -8,61 +8,13 @@ import {
   runPageRefresh,
 } from "./lib/pageActions";
 import { useConnections } from "./lib/connectionStore";
+import ConnectionPicker from "./components/ConnectionPicker.vue";
 
 const open = ref(true);
 const route = useRoute();
 const router = useRouter();
 
-const {
-  connections,
-  selectedId,
-  selectedConnection,
-  status,
-  statusMessage,
-  canAccess,
-  loadConnections,
-  selectConnection,
-} = useConnections();
-
-const connectionItems = computed<SelectItem[]>(() =>
-  connections.value.map((connection) => ({
-    label: connection.name,
-    value: connection.id,
-  })),
-);
-
-// The leading indicator on the switcher: green only once a test has actually
-// succeeded, amber while checking, red on a failed check, grey when idle.
-const statusDotClass = computed(() => {
-  switch (status.value) {
-    case "connected":
-      return "bg-green-500";
-    case "checking":
-      return "bg-amber-500 animate-pulse";
-    case "error":
-      return "bg-red-500";
-    default:
-      return "bg-neutral-500";
-  }
-});
-
-const statusLabel = computed(() => {
-  switch (status.value) {
-    case "connected":
-      return "Connected";
-    case "checking":
-      return "Checking connection...";
-    case "error":
-      return statusMessage.value ? `Not connected: ${statusMessage.value}` : "Not connected";
-    default:
-      return "No connection";
-  }
-});
-
-function onSelectConnection(id: unknown) {
-  if (typeof id !== "string" || id === selectedId.value) return;
-  selectConnection(id);
-}
+const { selectedId, canAccess, loadConnections } = useConnections();
 
 // Switching to a different connection should reload whatever page is open so it
 // shows data for the newly active connection.
@@ -72,11 +24,11 @@ watch(selectedId, (newId, oldId) => {
   }
 });
 
-// A connection that turns out to be unreachable locks the workspace, so send the
-// user to the connections page even without an explicit navigation.
+// A connection that turns out to be unreachable locks every page but tables, so
+// send the user back there even without an explicit navigation.
 watch(canAccess, (allowed) => {
-  if (!allowed && route.path !== "/") {
-    router.push("/");
+  if (!allowed && route.path !== "/tables") {
+    router.push("/tables");
   }
 });
 
@@ -85,16 +37,6 @@ onMounted(() => {
 });
 
 const pageHeaders: Record<string, { title: string; description: string }> = {
-  "/": {
-    title: "Connections",
-    description:
-      "Manage local and hosted SpacetimeDB profiles without exposing tokens to the frontend.",
-  },
-  "/overview": {
-    title: "Overview",
-    description:
-      "Live client connections and how much space each table is using.",
-  },
   "/tables": {
     title: "Tables",
     description:
@@ -126,16 +68,6 @@ defineShortcuts({
 
 const baseItems: NavigationMenuItem[] = [
   {
-    label: "Connections",
-    icon: "i-lucide-plug",
-    to: "/",
-  },
-  {
-    label: "Overview",
-    icon: "i-lucide-layout-dashboard",
-    to: "/overview",
-  },
-  {
     label: "Tables",
     icon: "i-lucide-table",
     to: "/tables",
@@ -152,12 +84,12 @@ const baseItems: NavigationMenuItem[] = [
   },
 ];
 
-// Everything except the connections page needs a reachable connection, so those
-// links stay disabled until one is confirmed usable.
+// Every page but tables needs a reachable connection, so those links stay
+// disabled until one is confirmed usable.
 const items = computed<NavigationMenuItem[]>(() =>
   baseItems.map((item) => ({
     ...item,
-    disabled: item.to !== "/" && !canAccess.value,
+    disabled: item.to !== "/tables" && !canAccess.value,
   })),
 );
 </script>
@@ -167,36 +99,7 @@ const items = computed<NavigationMenuItem[]>(() =>
     <div class="flex h-screen min-h-0 bg-neutral-950">
       <USidebar v-model:open="open" title="Spacetime Studio" collapsible="icon" class="select-none">
         <template #default="{ state }">
-          <div class="overflow-hidden">
-            <USelect
-              v-if="state !== 'collapsed'"
-              :model-value="selectedId ?? undefined"
-              :items="connectionItems"
-              value-key="value"
-              placeholder="No connection"
-              :disabled="connections.length === 0"
-              class="w-full"
-              :ui="{ base: 'w-full' }"
-              @update:model-value="onSelectConnection"
-            >
-              <template #leading>
-                <span
-                  class="size-2 shrink-0 rounded-full"
-                  :class="statusDotClass"
-                  :aria-label="statusLabel"
-                  :title="statusLabel"
-                />
-              </template>
-              <template #default>
-                <span class="truncate">
-                  {{ selectedConnection?.name ?? "No connection" }}
-                </span>
-              </template>
-            </USelect>
-            <div v-else class="flex justify-center py-1.5" :title="statusLabel">
-              <span class="size-2.5 rounded-full" :class="statusDotClass" />
-            </div>
-          </div>
+          <ConnectionPicker :collapsed="state === 'collapsed'" />
 
           <UNavigationMenu
             :items="items"
@@ -215,7 +118,7 @@ const items = computed<NavigationMenuItem[]>(() =>
             color="neutral"
             variant="ghost"
             :aria-label="open ? 'Close sidebar' : 'Open sidebar'"
-            @click="open = !open"
+            @click="() => { open = !open }"
           />
           <div class="min-w-0 flex-1 select-none">
             <p class="truncate text-sm font-medium text-highlighted">

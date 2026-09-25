@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { TableColumn, TableRow } from "@nuxt/ui";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import {
   getSchema,
@@ -13,6 +14,7 @@ import {
   clearPageRefreshHandler,
   setPageRefreshHandler,
 } from "../lib/pageActions";
+import { dataTableUi } from "../lib/tableUi";
 
 type FunctionParamValue = string | boolean;
 type BadgeColor = "info" | "success" | "warning" | "neutral";
@@ -36,6 +38,54 @@ const functions = computed<FunctionSummary[]>(() => {
 
   return reducers.filter((item) => item.name.toLowerCase().includes(query));
 });
+
+// Parameters drops its right border because the pinned Actions column already
+// draws one on its left.
+const columns: TableColumn<FunctionSummary>[] = [
+  {
+    id: "name",
+    header: "Function",
+    meta: {
+      class: {
+        th: "whitespace-nowrap border-r border-default",
+        td: "min-w-56 border-r border-default/60 align-top",
+      },
+    },
+  },
+  {
+    id: "type",
+    header: "Type",
+    meta: {
+      class: {
+        th: "whitespace-nowrap border-r border-default",
+        td: "whitespace-nowrap border-r border-default/60 align-top",
+      },
+    },
+  },
+  {
+    id: "params",
+    header: "Parameters",
+    meta: { class: { th: "min-w-80", td: "align-top" } },
+  },
+  {
+    id: "actions",
+    header: "Actions",
+    meta: {
+      class: {
+        th: "w-28 text-right",
+        td: "whitespace-nowrap text-right align-top",
+      },
+    },
+  },
+];
+
+function getFunctionRowId(fn: FunctionSummary) {
+  return fn.name;
+}
+
+function onSelectFunction(_: Event, row: TableRow<FunctionSummary>) {
+  openRunner(row.original);
+}
 
 const selectedFunction = computed<FunctionSummary | null>(
   () =>
@@ -195,86 +245,53 @@ onUnmounted(() => {
       :description="error"
       class="shrink-0"
     />
-    <div
-      class="min-h-0 flex-1 overflow-auto rounded-md border border-default bg-default/30"
+    <UTable
+      :data="functions"
+      :columns="columns"
+      :get-row-id="getFunctionRowId"
+      :meta="{ class: { tr: 'cursor-pointer transition' } }"
+      sticky="header"
+      :column-pinning="{ right: ['actions'] }"
+      class="min-h-0 flex-1 rounded-md border border-default bg-default/30"
+      :ui="{ ...dataTableUi, empty: loading ? 'hidden' : dataTableUi.empty }"
+      @select="onSelectFunction"
     >
-      <table class="min-w-full text-sm">
-        <thead class="bg-default/60">
-          <tr>
-            <th
-              class="whitespace-nowrap border-b border-r border-default px-3 py-2 text-left text-xs font-medium text-muted"
-            >
-              Function
-            </th>
-            <th
-              class="whitespace-nowrap border-b border-r border-default px-3 py-2 text-left text-xs font-medium text-muted"
-            >
-              Type
-            </th>
-            <th
-              class="min-w-80 border-b border-r border-default px-3 py-2 text-left text-xs font-medium text-muted"
-            >
-              Parameters
-            </th>
-            <th
-              class="sticky right-0 z-20 w-28 border-b border-l border-default bg-default/95 px-3 py-2 text-right text-xs font-medium text-muted shadow-[-12px_0_18px_-18px_rgba(0,0,0,0.9)]"
-            >
-              Actions
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="!loading && !functions.length">
-            <td class="px-3 py-6 text-muted" colspan="4">
-              No functions found.
-            </td>
-          </tr>
-          <tr
-            v-for="fn in functions"
-            :key="fn.name"
-            class="cursor-pointer border-b border-default/60 transition hover:bg-default/50"
-            @click="openRunner(fn)"
+      <template #name-cell="{ row }">
+        <span class="font-medium text-highlighted">{{ row.original.name }}</span>
+      </template>
+
+      <template #type-cell="{ row }">
+        <UBadge color="neutral" variant="subtle">{{
+          row.original.lifecycle ?? "callable"
+        }}</UBadge>
+      </template>
+
+      <template #params-cell="{ row }">
+        <div v-if="row.original.params.length" class="flex flex-wrap gap-2">
+          <UBadge
+            v-for="param in row.original.params"
+            :key="param.name"
+            variant="soft"
+            :color="paramBadgeColor(param)"
           >
-            <td
-              class="min-w-56 border-r border-default/60 px-3 py-2 align-top"
-            >
-              <span class="font-medium text-highlighted">{{ fn.name }}</span>
-            </td>
-            <td
-              class="whitespace-nowrap border-r border-default/60 px-3 py-2 align-top"
-            >
-              <UBadge color="neutral" variant="subtle">{{
-                fn.lifecycle ?? "callable"
-              }}</UBadge>
-            </td>
-            <td class="border-r border-default/60 px-3 py-2 align-top">
-              <div v-if="fn.params.length" class="flex flex-wrap gap-2">
-                <UBadge
-                  v-for="param in fn.params"
-                  :key="param.name"
-                  variant="soft"
-                  :color="paramBadgeColor(param)"
-                >
-                  {{ param.name }}: {{ param.type }}
-                </UBadge>
-              </div>
-              <span v-else class="text-muted">No parameters</span>
-            </td>
-            <td
-              class="sticky right-0 z-10 whitespace-nowrap border-l border-default/60 bg-default/95 px-3 py-2 text-right align-top shadow-[-12px_0_18px_-18px_rgba(0,0,0,0.9)]"
-            >
-              <UButton
-                icon="i-lucide-play"
-                size="xs"
-                variant="ghost"
-                aria-label="Run function"
-                @click.stop="openRunner(fn)"
-              />
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+            {{ param.name }}: {{ param.type }}
+          </UBadge>
+        </div>
+        <span v-else class="text-muted">No parameters</span>
+      </template>
+
+      <template #actions-cell="{ row }">
+        <UButton
+          icon="i-lucide-play"
+          size="xs"
+          variant="ghost"
+          aria-label="Run function"
+          @click.stop="openRunner(row.original)"
+        />
+      </template>
+
+      <template #empty>No functions found.</template>
+    </UTable>
 
     <USlideover
       v-model:open="runnerOpen"

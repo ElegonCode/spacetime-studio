@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
       "port": 1420
+    },
+    {
+      "name": "spacetime-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--port", "1430", "--strictPort"],
+      "port": 1430
     }
   ]
 }
