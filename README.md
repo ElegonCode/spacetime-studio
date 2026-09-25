@@ -10,7 +10,7 @@ Windows builds are available from the GitHub Releases page. macOS and Linux buil
 
 - Save connection profiles for local or hosted SpacetimeDB databases.
 - Store bearer tokens in the operating system keychain instead of the frontend.
-- See how many clients are connected right now and how much space each table uses.
+- See which saved servers are online and switch between them from the sidebar.
 - Inspect tables, columns, access modes, and primary keys from the database schema.
 - Browse table rows with pagination.
 - Create, update, and delete rows through the table UI.
@@ -90,7 +90,8 @@ Tauri will start the Vite dev server and open the Spacetime Studio desktop windo
 ## Connecting To A Database
 
 1. Open Spacetime Studio.
-2. Create a connection profile.
+2. Click **Add connection**, either on the Tables page or in the connection picker at
+   the top of the sidebar.
 3. Enter a friendly profile name.
 4. Pick a host:
    - **Local server** uses `http://localhost:3000`.
@@ -107,8 +108,13 @@ Tauri will start the Vite dev server and open the Spacetime Studio desktop windo
    add it with `spacetime server add`, run
    `spacetime login --server-issued-login <server>`, then copy the value from
    `spacetime login show --token`.
-7. Click the test action to verify the host and database can be reached.
-8. Save the profile and select it.
+7. Click **Test** to verify the host and database can be reached.
+8. Click **Save**. A new profile becomes the active connection straight away.
+
+To switch connections, open the picker at the top of the sidebar. It re-checks every
+saved server when it opens and labels each one **Online**, **Offline** (the host could
+not be reached), or **Error** (the host answered but rejected the database or token).
+Hover a connection to edit or delete it.
 
 When editing an existing profile, leave the token field blank to keep the token that is
 already in your OS keychain.
@@ -117,30 +123,19 @@ Connection profile metadata is stored locally by the app. Bearer tokens are stor
 
 ## Using The App
 
-Use the main navigation to move between the available workspace views:
+Use the sidebar to move between the available workspace views:
 
-- **Connections** manages connection profiles and selects the active one.
-- **Overview** shows the current client connection count and a breakdown of how many
-  megabytes each table is using.
-- **Tables** shows the schema, table rows, row editing controls, and raw SQL runner.
+- **Tables** is the home page. It shows the schema, table rows, row editing controls,
+  and raw SQL runner. Tables are grouped into Private and Public sections.
 - **Functions** lists reducers, lifecycle functions, and their parameters.
-- **Logs** shows recent database logs and can refresh automatically.
+- **Logs** shows recent database logs, color-coded by level, and can refresh
+  automatically.
+
+Functions and Logs are disabled until the active connection is confirmed reachable.
+If it can't be reached, the Tables page shows the error with options to retry or edit
+the connection.
 
 Some operations require database permissions. If a request fails with an authorization error, update the connection profile with a token that has the needed access.
-
-### Where The Overview Numbers Come From
-
-The Overview page reads whichever source the host makes available and says which one
-it used, so an estimate is never presented as an exact figure.
-
-- **Connections** come from the `st_client` system table, which needs a token with
-  owner access. When that read is refused, the page falls back to the host's
-  `spacetime_worker_connected_clients` gauge.
-- **Table sizes** come from the host's Prometheus endpoint at `/v1/metrics`, which
-  reports the exact bytes used by each table's rows and index keys. Hosts that do not
-  expose that endpoint - Maincloud among them - fall back to an estimate calculated
-  from `SELECT count(*)` per table and the width of each column's type. The page
-  labels estimated sizes and explains why the exact numbers were unavailable.
 
 ## Build Commands
 
