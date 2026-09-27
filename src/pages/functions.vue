@@ -4,20 +4,43 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import {
   getSchema,
   getSelectedConnectionId,
-  parseCell,
   runFunction,
   type ColumnSummary,
   type FunctionSummary,
   type SchemaSummary,
 } from "../lib/spacetime";
+import { kindBadgeColor, parseArg } from "../lib/cells";
 import {
   clearPageRefreshHandler,
   setPageRefreshHandler,
 } from "../lib/pageActions";
 import { dataTableUi } from "../lib/tableUi";
+import { useConnections } from "../lib/connectionStore";
 
 type FunctionParamValue = string | boolean;
-type BadgeColor = "info" | "success" | "warning" | "neutral";
+
+const { selectedConnection } = useConnections();
+const readOnly = computed(() => selectedConnection.value?.readOnly ?? false);
+
+const LIFECYCLE_LABELS: Record<string, string> = {
+  Init: "init",
+  OnConnect: "client connected",
+  OnDisconnect: "client disconnected",
+};
+
+function typeLabel(fn: FunctionSummary) {
+  if (fn.lifecycle) return LIFECYCLE_LABELS[fn.lifecycle] ?? fn.lifecycle;
+  if (fn.scheduledBy) return "scheduled";
+  return "callable";
+}
+
+// The server runs lifecycle reducers itself and rejects direct calls to them.
+function blockedReason(fn: FunctionSummary | null) {
+  if (!fn) return "";
+  if (fn.lifecycle) return "Lifecycle reducers are run by SpacetimeDB and can't be called directly.";
+  if (readOnly.value) return "This connection is read-only. Turn off read-only mode in its settings to call reducers.";
+  return "";
+}
 
 const connectionId = ref<string | null>(getSelectedConnectionId());
 const schema = ref<SchemaSummary | null>(null);
@@ -30,6 +53,7 @@ const runnerOpen = ref(false);
 const selectedFunctionName = ref("");
 const paramForm = ref<Record<string, FunctionParamValue>>({});
 const runResult = ref<unknown>(null);
+const runError = ref("");
 
 const functions = computed<FunctionSummary[]>(() => {
   const query = filter.value.trim().toLowerCase();
@@ -99,31 +123,16 @@ const formattedRunResult = computed(() => {
   return JSON.stringify(runResult.value, null, 2);
 });
 
-function normalizeType(type: string) {
-  return type.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
 function isBooleanParam(param: ColumnSummary) {
-  return ["bool", "boolean"].includes(normalizeType(param.type));
+  return param.kind === "bool";
 }
 
 function isNumberParam(param: ColumnSummary) {
-  return (
-    /^(u|i)(8|16|32|64|128)$/.test(normalizeType(param.type)) ||
-    /^(f)(32|64)$/.test(normalizeType(param.type)) ||
-    ["usize", "isize"].includes(normalizeType(param.type))
-  );
+  return param.kind === "integer" || param.kind === "float";
 }
 
 function isStringParam(param: ColumnSummary) {
-  return ["str", "string"].includes(normalizeType(param.type));
-}
-
-function paramBadgeColor(param: ColumnSummary): BadgeColor {
-  if (isStringParam(param)) return "info";
-  if (isNumberParam(param)) return "success";
-  if (isBooleanParam(param)) return "warning";
-  return "neutral";
+  return param.kind === "string";
 }
 
 function defaultParamValue(param: ColumnSummary): FunctionParamValue {
@@ -136,6 +145,7 @@ function openRunner(fn: FunctionSummary) {
     fn.params.map((param) => [param.name, defaultParamValue(param)]),
   );
   runResult.value = null;
+  runError.value = "";
   status.value = "";
   error.value = "";
   runnerOpen.value = true;
@@ -161,12 +171,7 @@ function setBooleanParam(
 }
 
 function paramToArg(param: ColumnSummary) {
-  const value = paramForm.value[param.name];
-  if (isBooleanParam(param)) return value === true;
-
-  const text = String(value ?? "");
-  if (isStringParam(param)) return text;
-  return parseCell(text);
+  return parseArg(String(paramForm.value[param.name] ?? ""), param);
 }
 
 async function load() {
@@ -192,9 +197,11 @@ async function load() {
 async function runSelectedFunction() {
   if (!connectionId.value || !selectedFunction.value) return;
 
+  if (blockedReason(selectedFunction.value)) return;
+
   const args = selectedFunction.value.params.map(paramToArg);
   running.value = true;
-  error.value = "";
+  runError.value = "";
   status.value = "";
   runResult.value = null;
 
@@ -204,10 +211,11 @@ async function runSelectedFunction() {
       selectedFunction.value.name,
       args,
     );
-    runResult.value = result.results;
+    runResult.value = result;
     status.value = `${selectedFunction.value.name} ran successfully.`;
   } catch (err) {
-    error.value = String(err);
+    // Shown inside the runner, which covers the page-level alert.
+    runError.value = String(err);
   } finally {
     running.value = false;
   }
@@ -261,9 +269,13 @@ onUnmounted(() => {
       </template>
 
       <template #type-cell="{ row }">
-        <UBadge color="neutral" variant="subtle">{{
-          row.original.lifecycle ?? "callable"
-        }}</UBadge>
+        <UBadge
+          :color="row.original.lifecycle ? 'warning' : 'neutral'"
+          variant="subtle"
+          :icon="row.original.scheduledBy ? 'i-lucide-timer' : undefined"
+          :title="row.original.scheduledBy ? `Fired by rows in ${row.original.scheduledBy}` : undefined"
+          >{{ typeLabel(row.original) }}</UBadge
+        >
       </template>
 
       <template #params-cell="{ row }">
@@ -272,7 +284,7 @@ onUnmounted(() => {
             v-for="param in row.original.params"
             :key="param.name"
             variant="soft"
-            :color="paramBadgeColor(param)"
+            :color="kindBadgeColor(param)"
           >
             {{ param.name }}: {{ param.type }}
           </UBadge>
@@ -282,10 +294,10 @@ onUnmounted(() => {
 
       <template #actions-cell="{ row }">
         <UButton
-          icon="i-lucide-play"
+          :icon="blockedReason(row.original) ? 'i-lucide-eye' : 'i-lucide-play'"
           size="xs"
           variant="ghost"
-          aria-label="Run function"
+          :aria-label="blockedReason(row.original) ? 'View function' : 'Run function'"
           @click.stop="openRunner(row.original)"
         />
       </template>
@@ -295,7 +307,7 @@ onUnmounted(() => {
 
     <USlideover
       v-model:open="runnerOpen"
-      title="Run Function"
+      :title="blockedReason(selectedFunction) ? 'Function' : 'Run Function'"
       :description="selectedFunctionName"
       side="right"
       :ui="{
@@ -307,10 +319,30 @@ onUnmounted(() => {
       <template #body>
         <div class="space-y-5">
           <UAlert
+            v-if="blockedReason(selectedFunction)"
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-lock"
+            :description="blockedReason(selectedFunction)"
+          />
+          <UAlert
+            v-if="selectedFunction?.scheduledBy"
+            color="neutral"
+            variant="subtle"
+            icon="i-lucide-timer"
+            :description="`Scheduled: SpacetimeDB calls this whenever a row in ${selectedFunction.scheduledBy} comes due.`"
+          />
+          <UAlert
             v-if="status"
             color="success"
             variant="subtle"
             :description="status"
+          />
+          <UAlert
+            v-if="runError"
+            color="error"
+            variant="subtle"
+            :description="runError"
           />
 
           <UForm
@@ -380,6 +412,7 @@ onUnmounted(() => {
             :loading="running"
             type="submit"
             form="function-runner-form"
+            :disabled="Boolean(blockedReason(selectedFunction))"
           >
             Run
           </UButton>

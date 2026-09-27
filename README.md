@@ -9,14 +9,18 @@ Windows builds are available from the GitHub Releases page. macOS and Linux buil
 ## What You Can Do
 
 - Save connection profiles for local or hosted SpacetimeDB databases.
+- Reuse the token and server list from your `spacetime` CLI login instead of pasting tokens.
 - Store bearer tokens in the operating system keychain instead of the frontend.
+- Mark a connection **read-only** so row edits, reducer calls, and writing SQL are blocked.
 - See which saved servers are online and switch between them from the sidebar.
-- Inspect tables, columns, access modes, and primary keys from the database schema.
-- Browse table rows with pagination.
-- Create, update, and delete rows through the table UI.
-- Run raw SQL against the selected database.
-- Browse reducers, lifecycle functions, and function parameters.
-- Read database logs with live refresh.
+- Inspect tables, columns, readable types (Identity, Timestamp, `Option<T>`, named structs),
+  primary keys, and schedule tables.
+- Browse table rows with pagination and a total row count, and export them to CSV or JSON.
+- Create, update, and delete rows. Only changed columns are written, and an edit or delete
+  is refused unless it matches exactly one row.
+- Run SQL in a console with history, multi-statement results, and CSV/JSON export.
+- Browse and call reducers, with lifecycle and scheduled reducers labelled.
+- Stream database logs live, filtered by level or text.
 
 ## Tech Stack
 
@@ -125,13 +129,14 @@ Connection profile metadata is stored locally by the app. Bearer tokens are stor
 
 Use the sidebar to move between the available workspace views:
 
-- **Tables** is the home page. It shows the schema, table rows, row editing controls,
-  and raw SQL runner. Tables are grouped into Private and Public sections.
+- **Tables** is the home page. It shows the schema, table rows, and row editing controls.
+  Tables are grouped into Private and Public sections. Edit a cell inline and press Enter
+  (or the save icon) to write it; Esc discards the edit.
+- **SQL** runs any statement against the database. Ctrl+Enter runs the query.
 - **Functions** lists reducers, lifecycle functions, and their parameters.
-- **Logs** shows recent database logs, color-coded by level, and can refresh
-  automatically.
+- **Logs** streams database logs as they are written, color-coded by level.
 
-Functions and Logs are disabled until the active connection is confirmed reachable.
+SQL, Functions and Logs are disabled until the active connection is confirmed reachable.
 If it can't be reached, the Tables page shows the error with options to retry or edit
 the connection.
 
@@ -168,7 +173,9 @@ spacetime-studio/
 |   +-- lib/              Frontend API wrappers and helpers
 |   +-- pages/            App views
 +-- src-tauri/           Tauri and Rust backend
-|   +-- src/spacetime.rs  SpacetimeDB profile, schema, SQL, row, and log commands
+|   +-- src/spacetime/    Tauri commands (mod.rs) plus the HTTP client (api.rs),
+|                         schema parsing (schema.rs), SQL building (sql.rs), log
+|                         streaming (logs.rs), CLI config import and export
 +-- public/              Static assets
 +-- package.json         npm scripts and frontend dependencies
 +-- README.md
@@ -180,6 +187,9 @@ spacetime-studio/
 - SpacetimeDB HTTP requests happen in the Rust backend, not directly in the browser layer.
 - Saved profiles live in the app data directory.
 - Tokens are never returned to the frontend after they are saved.
+- Read-only mode is enforced in the Rust backend, not just hidden in the UI.
+- Backend logs go to stdout and to the OS log directory via `tauri-plugin-log`.
+- Run the backend unit tests with `cargo test` in `src-tauri/`.
 - The app is early-stage, so expect rough edges and incomplete workflows.
 
 ## Contributing

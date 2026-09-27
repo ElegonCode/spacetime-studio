@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 export type ConnectionProfile = {
   id: string;
@@ -7,13 +7,27 @@ export type ConnectionProfile = {
   database: string;
   identity?: string | null;
   hasToken: boolean;
+  readOnly: boolean;
   createdAt: number;
   updatedAt: number;
 };
 
+// How a column's values are written in SQL and shown in the UI, derived from
+// its algebraic type by the backend.
+export type ColumnKind =
+  | "integer"
+  | "float"
+  | "bool"
+  | "string"
+  | "identity"
+  | "connectionId"
+  | "timestamp"
+  | "other";
+
 export type ColumnSummary = {
   name: string;
   type: string;
+  kind: ColumnKind;
 };
 
 export type TableSummary = {
@@ -22,12 +36,14 @@ export type TableSummary = {
   access: string;
   columns: ColumnSummary[];
   primaryKey: string[];
+  scheduledReducer?: string | null;
 };
 
 export type FunctionSummary = {
   name: string;
   lifecycle?: string | null;
   params: ColumnSummary[];
+  scheduledBy?: string | null;
 };
 
 export type SchemaSummary = {
@@ -36,13 +52,16 @@ export type SchemaSummary = {
   reducers: FunctionSummary[];
 };
 
+export type Row = Record<string, unknown>;
+
 export type TablePage = {
   columns: ColumnSummary[];
-  rows: Record<string, unknown>[];
+  rows: Row[];
   total?: number | null;
   hasMore: boolean;
   page: number;
   pageSize: number;
+  scanLimit?: number | null;
 };
 
 export type TestConnectionResult = {
@@ -52,13 +71,28 @@ export type TestConnectionResult = {
   message: string;
 };
 
-export type SqlResult = {
-  results: unknown;
+export type SqlStatementResult = {
+  columns: ColumnSummary[];
+  rows: unknown[][];
+  durationMicros?: number | null;
 };
 
-export type FunctionRunResult = {
-  results: unknown;
+export type SqlResult = {
+  statements: SqlStatementResult[];
 };
+
+export type CliConfigSummary = {
+  path: string;
+  hasToken: boolean;
+  servers: { nickname: string; url: string; isDefault: boolean }[];
+};
+
+export type LogEvent =
+  | { kind: "lines"; lines: string[] }
+  | { kind: "error"; message: string }
+  | { kind: "end" };
+
+export type ExportFormat = "csv" | "json";
 
 const SELECTED_CONNECTION_KEY = "spacetime-studio:selected-connection";
 
@@ -84,6 +118,8 @@ export function saveConnection(input: {
   baseUrl: string;
   database: string;
   token?: string;
+  useCliToken?: boolean;
+  readOnly?: boolean;
 }) {
   return invoke<ConnectionProfile>("save_connection", { input });
 }
@@ -97,8 +133,13 @@ export function testConnection(input: {
   baseUrl?: string;
   database?: string;
   token?: string;
+  useCliToken?: boolean;
 }) {
   return invoke<TestConnectionResult>("test_connection", { input });
+}
+
+export function getCliConfig() {
+  return invoke<CliConfigSummary | null>("get_cli_config");
 }
 
 export function getSchema(connectionId: string) {
@@ -130,63 +171,80 @@ export function runFunction(
   functionName: string,
   args: unknown[],
 ) {
-  return invoke<FunctionRunResult>("run_function", {
+  return invoke<unknown>("run_function", {
     connectionId,
     functionName,
     args,
   });
 }
 
-export function createRow(
-  connectionId: string,
-  tableName: string,
-  row: Record<string, unknown>,
-) {
-  return invoke<SqlResult>("create_row", { connectionId, tableName, row });
+export function createRow(connectionId: string, tableName: string, row: Row) {
+  return invoke<void>("create_row", { connectionId, tableName, row });
 }
 
+// `changes` holds only the columns to set. The backend identifies the row from
+// `originalRow` and refuses to write unless exactly one row matches.
 export function updateRow(
   connectionId: string,
   tableName: string,
-  originalRow: Record<string, unknown>,
-  updatedRow: Record<string, unknown>,
+  originalRow: Row,
+  changes: Row,
 ) {
-  return invoke<SqlResult>("update_row", {
+  return invoke<void>("update_row", {
     connectionId,
     tableName,
     originalRow,
-    updatedRow,
+    changes,
   });
 }
 
-export function removeRow(
+export function removeRow(connectionId: string, tableName: string, row: Row) {
+  return invoke<void>("delete_row", { connectionId, tableName, row });
+}
+
+// Streams log lines as they are written (or just the last `numLines` when not
+// following). Returns a function that stops the stream.
+export async function streamLogs(
+  connectionId: string,
+  options: { numLines: number; follow: boolean },
+  onEvent: (event: LogEvent) => void,
+) {
+  const channel = new Channel<LogEvent>(onEvent);
+  const streamId = await invoke<number>("start_log_stream", {
+    connectionId,
+    numLines: options.numLines,
+    follow: options.follow,
+    onEvent: channel,
+  });
+  return () => invoke<void>("stop_log_stream", { streamId });
+}
+
+// Both exports open a native save dialog and resolve to the written path, or
+// null when the user cancels.
+export function exportRows(
+  defaultName: string,
+  format: ExportFormat,
+  columns: ColumnSummary[],
+  rows: unknown[][],
+) {
+  return invoke<string | null>("export_rows", {
+    defaultName,
+    format,
+    columns,
+    rows,
+  });
+}
+
+export function exportTable(
   connectionId: string,
   tableName: string,
-  row: Record<string, unknown>,
+  format: ExportFormat,
+  where?: string,
 ) {
-  return invoke<SqlResult>("delete_row", { connectionId, tableName, row });
-}
-
-export function getLogs(connectionId: string, numLines = 200) {
-  return invoke<string>("get_logs", { connectionId, numLines });
-}
-
-export function stringifyCell(value: unknown) {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
-}
-
-export function parseCell(value: string) {
-  const trimmed = value.trim();
-  if (trimmed === "") return "";
-  if (trimmed === "true") return true;
-  if (trimmed === "false") return false;
-  if (/^-?\d+(\.\d+)?$/.test(trimmed)) return Number(trimmed);
-
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    return value;
-  }
+  return invoke<string | null>("export_table", {
+    connectionId,
+    tableName,
+    format,
+    whereClause: where,
+  });
 }

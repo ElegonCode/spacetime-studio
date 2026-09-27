@@ -45,6 +45,13 @@ declare module 'vue-router/auto-routes' {
       Record<never, never>,
       | never
     >,
+    '/sql': RouteRecordInfo<
+      '/sql',
+      '/sql',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
     '/tables': RouteRecordInfo<
       '/tables',
       '/tables',
@@ -76,6 +83,14 @@ declare module 'vue-router/auto-routes' {
     'src/pages/logs.vue': {
       routes:
         | '/logs'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
+    'src/pages/sql.vue': {
+      routes:
+        | '/sql'
       views:
         | never
       pathParamNames:

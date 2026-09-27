@@ -49,7 +49,7 @@ function badgeFor(entry: Reachability | undefined): Badge {
     case "checking":
       return { label: "Checking", dot: "bg-amber-500 animate-pulse", text: "text-muted" };
     case "error":
-      return /^(Could not reach|Host responded)/.test(entry.message)
+      return /^(Could not reach|Ping timed out|Host responded)/.test(entry.message)
         ? { label: "Offline", dot: "bg-red-500", text: "text-red-400" }
         : { label: "Error", dot: "bg-orange-500", text: "text-orange-400" };
     default:
@@ -198,6 +198,12 @@ async function confirmDelete() {
                   <span class="truncate text-sm font-medium text-highlighted">
                     {{ connection.name }}
                   </span>
+                  <UIcon
+                    v-if="connection.readOnly"
+                    name="i-lucide-lock"
+                    class="size-3 shrink-0 text-dimmed"
+                    title="Read-only"
+                  />
                   <UIcon
                     v-if="connection.id === selectedId"
                     name="i-lucide-check"

@@ -14,7 +14,7 @@ const open = ref(true);
 const route = useRoute();
 const router = useRouter();
 
-const { selectedId, canAccess, loadConnections } = useConnections();
+const { selectedId, selectedConnection, canAccess, loadConnections } = useConnections();
 
 // Switching to a different connection should reload whatever page is open so it
 // shows data for the newly active connection.
@@ -40,7 +40,11 @@ const pageHeaders: Record<string, { title: string; description: string }> = {
   "/tables": {
     title: "Tables",
     description:
-      "Browse schema, page through rows, and run generic SQL mutations.",
+      "Browse schema, page through rows, and edit table data.",
+  },
+  "/sql": {
+    title: "SQL",
+    description: "Run SQL against the database and export the results.",
   },
   "/functions": {
     title: "Functions",
@@ -71,6 +75,11 @@ const baseItems: NavigationMenuItem[] = [
     label: "Tables",
     icon: "i-lucide-table",
     to: "/tables",
+  },
+  {
+    label: "SQL",
+    icon: "i-lucide-square-terminal",
+    to: "/sql",
   },
   {
     label: "Functions",
@@ -128,6 +137,15 @@ const items = computed<NavigationMenuItem[]>(() =>
               {{ pageHeader.description }}
             </p>
           </div>
+          <UBadge
+            v-if="selectedConnection?.readOnly"
+            color="neutral"
+            variant="subtle"
+            icon="i-lucide-lock"
+            title="Writes are blocked for this connection. Change it in the connection settings."
+          >
+            Read-only
+          </UBadge>
           <UButton
             icon="i-lucide-refresh-cw"
             color="neutral"

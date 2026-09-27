@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import {
+  getCliConfig,
   saveConnection,
   testConnection,
+  type CliConfigSummary,
   type ConnectionProfile,
 } from "../lib/spacetime";
 import { useConnections } from "../lib/connectionStore";
@@ -27,14 +29,24 @@ const testing = ref(false);
 const error = ref("");
 const status = ref("");
 
-const form = ref({
-  id: "",
-  name: "Localhost",
-  baseUrl: LOCALHOST_URL,
-  database: "",
-  token: "",
-});
+function blankForm() {
+  return {
+    id: "",
+    name: "Localhost",
+    baseUrl: LOCALHOST_URL,
+    database: "",
+    token: "",
+    useCliToken: false,
+    readOnly: false,
+  };
+}
+
+const form = ref(blankForm());
 const hostMode = ref<HostMode>("local");
+const cliConfig = ref<CliConfigSummary | null>(null);
+// New profiles default to read-only for remote hosts and writable for a local
+// dev server, until the user flips the switch themselves.
+const readOnlyTouched = ref(false);
 
 const isEditing = computed(() => Boolean(form.value.id));
 const editingHasToken = computed(() => props.connection?.hasToken ?? false);
@@ -62,18 +74,37 @@ watch(open, (isOpen) => {
         baseUrl: connection.baseUrl,
         database: connection.database,
         token: "",
+        useCliToken: false,
+        readOnly: connection.readOnly,
       }
-    : { id: "", name: "Localhost", baseUrl: LOCALHOST_URL, database: "", token: "" };
+    : blankForm();
+  readOnlyTouched.value = Boolean(connection);
   hostMode.value = hostModeForUrl(form.value.baseUrl);
   error.value = "";
   status.value = "";
+  getCliConfig()
+    .then((config) => (cliConfig.value = config))
+    .catch(() => (cliConfig.value = null));
 });
+
+// Loopback servers from the CLI config ("127.0.0.1:3000") count as local.
+function useCliServer(url: string) {
+  const normalized = url.replace("://127.0.0.1", "://localhost");
+  hostMode.value = hostModeForUrl(normalized);
+  form.value.baseUrl = hostMode.value === "custom" ? url : normalized;
+}
+
+function setReadOnly(value: boolean) {
+  readOnlyTouched.value = true;
+  form.value.readOnly = value;
+}
 
 // Don't leave a preset URL sitting in the custom field once the user opts out of the preset.
 watch(hostMode, (mode) => {
   if (mode === "custom" && hostModeForUrl(form.value.baseUrl) !== "custom") {
     form.value.baseUrl = "";
   }
+  if (!readOnlyTouched.value) form.value.readOnly = mode !== "local";
 });
 
 async function save() {
@@ -90,7 +121,9 @@ async function save() {
       name: form.value.name,
       baseUrl: selectedBaseUrl.value,
       database: form.value.database,
-      token: form.value.token || undefined,
+      token: form.value.useCliToken ? undefined : form.value.token || undefined,
+      useCliToken: form.value.useCliToken,
+      readOnly: form.value.readOnly,
     });
     await loadConnections();
     // Adding a connection makes it the active one so the workspace unlocks
@@ -121,7 +154,8 @@ async function test() {
       id: form.value.id || undefined,
       baseUrl: selectedBaseUrl.value,
       database: form.value.database,
-      token: form.value.token || undefined,
+      token: form.value.useCliToken ? undefined : form.value.token || undefined,
+      useCliToken: form.value.useCliToken,
     });
     status.value = result.databaseIdentity
       ? `${result.message}. Database identity ${result.databaseIdentity}.`
@@ -163,7 +197,27 @@ async function test() {
         <UFormField v-else label="Host URL">
           <UInput :model-value="selectedBaseUrl" class="w-full" disabled />
         </UFormField>
-        <UFormField label="Auth token">
+        <div v-if="cliConfig?.servers.length" class="-mt-2 flex flex-wrap items-center gap-1.5">
+          <span class="text-xs text-muted">From spacetime CLI:</span>
+          <UButton
+            v-for="server in cliConfig.servers"
+            :key="server.nickname"
+            size="xs"
+            color="neutral"
+            variant="soft"
+            :title="server.url"
+            @click="useCliServer(server.url)"
+          >
+            {{ server.nickname }}
+          </UButton>
+        </div>
+        <UCheckbox
+          v-if="cliConfig?.hasToken"
+          v-model="form.useCliToken"
+          label="Use the token from my spacetime CLI login"
+          :description="`Copied from ${cliConfig.path} into the OS keychain. The CLI keeps one token, issued by the server you last logged in to.`"
+        />
+        <UFormField v-if="!form.useCliToken" label="Auth token">
           <UInput
             v-model="form.token"
             class="w-full"
@@ -176,7 +230,20 @@ async function test() {
           />
         </UFormField>
 
-        <UAlert color="neutral" variant="subtle" icon="i-lucide-info" :description="tokenHelp" />
+        <UAlert
+          v-if="!form.useCliToken"
+          color="neutral"
+          variant="subtle"
+          icon="i-lucide-info"
+          :description="tokenHelp"
+        />
+
+        <USwitch
+          :model-value="form.readOnly"
+          label="Read-only"
+          description="Block row edits, reducer calls, and writing SQL on this connection. Recommended for production databases."
+          @update:model-value="setReadOnly"
+        />
 
         <UAlert v-if="error" color="error" variant="subtle" :description="error" />
         <UAlert v-if="status" color="success" variant="subtle" :description="status" />
