@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { TableColumn } from "@nuxt/ui";
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { useToast } from "@nuxt/ui/composables";
 import {
   executeSql,
   exportRows,

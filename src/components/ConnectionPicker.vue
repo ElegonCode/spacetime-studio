@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useToast } from "@nuxt/ui/composables";
 import { deleteConnection, type ConnectionProfile } from "../lib/spacetime";
 import { useConnections, type Reachability } from "../lib/connectionStore";
 import { editorOpen, editorTarget, openConnectionEditor } from "../lib/connectionUi";

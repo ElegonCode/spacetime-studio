@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { NavigationMenuItem } from "@nuxt/ui";
+import { defineShortcuts } from "@nuxt/ui/composables";
 import { useRoute, useRouter } from "vue-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import packageJson from "../package.json";

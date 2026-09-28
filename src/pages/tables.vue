@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { DropdownMenuItem, TableColumn, TabsItem } from "@nuxt/ui";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useToast } from "@nuxt/ui/composables";
 import {
   createRow,
   exportTable,
