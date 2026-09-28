@@ -7,11 +7,11 @@ export const router = createRouter({
   routes: [{ path: "/", redirect: "/tables" }, ...routes],
 });
 
-// The tables page is the home page and copes with having no connection, but the
-// other pages need a reachable one, so send the user back there until then.
+// Tables and settings work without a reachable database; database pages send
+// the user back to tables until a connection is available.
 router.beforeEach((to) => {
   const { canAccess } = useConnections();
-  if (!canAccess.value && to.path !== "/tables") {
+  if (!canAccess.value && !["/tables", "/settings"].includes(to.path)) {
     return "/tables";
   }
 });

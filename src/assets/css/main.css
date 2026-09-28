@@ -11,4 +11,11 @@
 
 .dark {
   --ui-primary: white;
+  --ui-bg: #09090b;
+  --ui-bg-muted: #18181b;
+  --ui-bg-elevated: #111113;
+  --ui-bg-accented: #27272a;
+  --ui-border: #27272a;
+  --ui-border-muted: #27272a;
+  --ui-border-accented: #3f3f46;
 }

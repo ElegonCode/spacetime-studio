@@ -2,8 +2,11 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { NavigationMenuItem } from "@nuxt/ui";
 import { useRoute, useRouter } from "vue-router";
-import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import {
+  availableUpdate,
+  checkForUpdate,
+} from "./lib/updateStore";
 import {
   pageRefreshHandler,
   pageRefreshLoading,
@@ -15,26 +18,10 @@ import ConnectionPicker from "./components/ConnectionPicker.vue";
 const open = ref(true);
 const route = useRoute();
 const router = useRouter();
-const availableUpdate = ref<Update | null>(null);
 const updateProgress = ref<number | null>(null);
 const updateError = ref(false);
 const installingUpdate = ref(false);
 let releaseCheckTimer: ReturnType<typeof setInterval> | undefined;
-let checkingForUpdate = false;
-
-async function checkForUpdate() {
-  if (checkingForUpdate) return;
-  checkingForUpdate = true;
-  try {
-    const update = await check();
-    availableUpdate.value = update;
-  } catch {
-    // Offline or unavailable update feeds should not interrupt the workspace.
-  } finally {
-    checkingForUpdate = false;
-  }
-}
-
 async function installUpdate() {
   if (!availableUpdate.value || installingUpdate.value) return;
   installingUpdate.value = true;
@@ -78,10 +65,10 @@ watch(selectedId, (newId, oldId) => {
   }
 });
 
-// A connection that turns out to be unreachable locks every page but tables, so
-// send the user back there even without an explicit navigation.
+// A connection that turns out to be unreachable locks database pages, while
+// settings remains available so the connection can be fixed.
 watch(canAccess, (allowed) => {
-  if (!allowed && route.path !== "/tables") {
+  if (!allowed && !["/tables", "/settings"].includes(route.path)) {
     router.push("/tables");
   }
 });
@@ -116,6 +103,10 @@ const pageHeaders: Record<string, { title: string; description: string }> = {
     title: "Logs",
     description:
       "Owner/admin credentials are required for private database logs.",
+  },
+  "/settings": {
+    title: "Settings",
+    description: "Manage application and connection settings.",
   },
 };
 
@@ -162,7 +153,7 @@ const items = computed<NavigationMenuItem[]>(() =>
 
 <template>
   <UApp :toaster="{ position: 'bottom-right', progress: true, duration: 4000 }">
-    <div class="flex h-screen min-h-0 bg-neutral-950">
+    <div class="flex h-screen min-h-0 bg-default">
       <USidebar
         v-model:open="open"
         title="Spacetime Studio"
@@ -182,6 +173,17 @@ const items = computed<NavigationMenuItem[]>(() =>
 
         <template #footer="{ state }">
           <div class="flex w-full flex-col gap-1">
+            <UButton
+              :icon="'i-lucide-settings'"
+              :color="route.path === '/settings' ? 'primary' : 'neutral'"
+              :variant="route.path === '/settings' ? 'soft' : 'ghost'"
+              :class="state === 'collapsed' ? 'mx-auto' : 'w-full justify-start'"
+              :aria-label="state === 'collapsed' ? 'Settings' : undefined"
+              title="Settings"
+              @click="router.push('/settings')"
+            >
+              <span v-if="state !== 'collapsed'">Settings</span>
+            </UButton>
             <div v-if="availableUpdate">
               <UAlert
                 v-if="state !== 'collapsed'"
@@ -218,17 +220,6 @@ const items = computed<NavigationMenuItem[]>(() =>
                 @click="open = true"
               />
             </div>
-            <div class="flex justify-end">
-              <UButton
-                size="xs"
-                :icon="open ? 'i-lucide-panel-left-close' : 'i-lucide-panel-left-open'"
-                color="neutral"
-                variant="ghost"
-                :aria-label="open ? 'Collapse sidebar' : 'Expand sidebar'"
-                :title="open ? 'Collapse sidebar' : 'Expand sidebar'"
-                @click="open = !open"
-              />
-            </div>
           </div>
         </template>
       </USidebar>
@@ -237,6 +228,15 @@ const items = computed<NavigationMenuItem[]>(() =>
         <div
           class="h-(--ui-header-height) shrink-0 flex items-center gap-3 px-4 border-b border-default"
         >
+          <UButton
+            size="xs"
+            :icon="open ? 'i-lucide-panel-left-close' : 'i-lucide-panel-left-open'"
+            color="neutral"
+            variant="ghost"
+            :aria-label="open ? 'Collapse sidebar' : 'Expand sidebar'"
+            :title="open ? 'Collapse sidebar' : 'Expand sidebar'"
+            @click="open = !open"
+          />
           <div class="min-w-0 flex-1 select-none">
             <p class="truncate text-sm font-medium text-highlighted">
               {{ pageHeader.title }}

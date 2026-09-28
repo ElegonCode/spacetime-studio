@@ -4,6 +4,7 @@ import * as monaco from "../../node_modules/monaco-editor/esm/vs/editor/editor.a
 import EditorWorker from "../../node_modules/monaco-editor/esm/vs/editor/editor.worker.js?worker";
 import "../../node_modules/monaco-editor/esm/vs/editor/contrib/suggest/browser/suggestController.js";
 import type { TableSummary } from "../lib/spacetime";
+import { resolvedTheme } from "../lib/theme";
 import "../../node_modules/monaco-editor/min/vs/editor/editor.main.css";
 
 const props = defineProps<{
@@ -240,7 +241,7 @@ onMounted(() => {
   editor = monaco.editor.create(host.value, {
     value: props.modelValue,
     language: "sql",
-    theme: "vs-dark",
+    theme: resolvedTheme.value === "dark" ? "vs-dark" : "vs",
     automaticLayout: true,
     minimap: { enabled: false },
     scrollBeyondLastLine: false,
@@ -255,6 +256,9 @@ onMounted(() => {
     wordBasedSuggestions: "off",
     suggest: { showWords: false, preview: false },
     ariaLabel: "SQL query editor",
+  });
+  watch(resolvedTheme, (theme) => {
+    monaco.editor.setTheme(theme === "dark" ? "vs-dark" : "vs");
   });
   editor.onDidChangeModelContent(() => emit("update:modelValue", editor?.getValue() ?? ""));
   editor.onKeyUp(({ browserEvent }) => {

@@ -107,7 +107,6 @@ const selectedTable = computed<TableSummary | null>(
     tables.value.find((table) => table.name === selectedTableName.value) ??
     null,
 );
-
 // The schema knows the declared types (named structs, enums); the SQL response
 // only knows the structural ones. Prefer the schema's view of each column.
 const pageColumns = computed<ColumnSummary[]>(() => {
@@ -502,8 +501,8 @@ onUnmounted(() => {
       close
       @update:open="error = ''"
     />
-    <div class="grid min-h-0 flex-1 xl:grid-cols-[250px_1fr]">
-      <aside class="flex min-h-0 flex-col bg-default/30">
+    <div class="grid min-h-0 min-w-0 flex-1 lg:grid-cols-[220px_minmax(0,1fr)]">
+      <aside class="flex min-h-0 min-w-0 flex-col bg-default/30">
         <div class="shrink-0 p-2">
           <UInput
             v-model="tableSearch"
@@ -520,49 +519,51 @@ onUnmounted(() => {
           >
             {{ loadingSchema ? "Loading tables..." : "No tables found." }}
           </p>
-          <UCollapsible
-            v-for="section in tableSections"
+          <template
+            v-for="(section, sectionIndex) in tableSections"
             :key="section.label"
-            :open="!collapsedSections[section.label]"
-            class="mb-3"
-            @update:open="collapsedSections[section.label] = !$event"
           >
             <button
               type="button"
-              class="group flex w-full items-center gap-1 px-3 pt-1 pb-1 text-xs font-medium text-muted select-none hover:text-highlighted"
+              class="group sticky z-10 flex h-8 w-full items-center gap-1 bg-default/95 px-3 text-xs font-medium text-muted select-none hover:text-highlighted"
+              :style="{
+                top: `${sectionIndex * 2}rem`,
+                bottom: `${(tableSections.length - sectionIndex - 1) * 2}rem`,
+              }"
+              :aria-expanded="!collapsedSections[section.label]"
+              @click="collapsedSections[section.label] = !collapsedSections[section.label]"
             >
               <UIcon
                 name="i-lucide-chevron-down"
-                class="size-3.5 transition-transform group-data-[state=closed]:-rotate-90"
+                class="size-3.5 transition-transform"
+                :class="collapsedSections[section.label] ? '-rotate-90' : ''"
               />
               {{ section.label }}
               <span class="font-normal text-dimmed">
                 ({{ section.items.length }})
               </span>
             </button>
-
-            <template #content>
-              <UTabs
-                v-model="selectedTableName"
-                orientation="vertical"
-                variant="pill"
-                :content="false"
-                :items="section.items"
-                class="w-full"
-                :ui="{
-                  list: 'items-start bg-opacity-0 w-full',
-                  trigger: 'w-full',
-                  // Each section is its own tab list, so hide the pill in the
-                  // ones that do not hold the selected table.
-                  indicator: section.items.some(
-                    (item) => item.value === selectedTableName,
-                  )
-                    ? undefined
-                    : 'hidden',
-                }"
-              />
-            </template>
-          </UCollapsible>
+            <UTabs
+              v-if="!collapsedSections[section.label]"
+              v-model="selectedTableName"
+              orientation="vertical"
+              variant="pill"
+              :content="false"
+              :items="section.items"
+              class="mb-3 w-full"
+              :ui="{
+                list: 'items-start bg-opacity-0 w-full',
+                trigger: 'w-full',
+                // Each section is its own tab list, so hide the pill in the
+                // ones that do not hold the selected table.
+                indicator: section.items.some(
+                  (item) => item.value === selectedTableName,
+                )
+                  ? undefined
+                  : 'hidden',
+              }"
+            />
+          </template>
         </div>
       </aside>
 
