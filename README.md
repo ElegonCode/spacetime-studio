@@ -2,6 +2,12 @@
 
 # Spacetime Studio
 
+[![Build installers](https://github.com/ElegonCode/spacetime-studio/actions/workflows/build.yml/badge.svg)](https://github.com/ElegonCode/spacetime-studio/actions/workflows/build.yml)
+[![Latest release](https://img.shields.io/github/v/release/ElegonCode/spacetime-studio?label=latest%20release)](https://github.com/ElegonCode/spacetime-studio/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/ElegonCode/spacetime-studio/total?label=downloads)](https://github.com/ElegonCode/spacetime-studio/releases)
+[![Stars](https://img.shields.io/github/stars/ElegonCode/spacetime-studio?style=flat)](https://github.com/ElegonCode/spacetime-studio/stargazers)
+[![License](https://img.shields.io/github/license/ElegonCode/spacetime-studio)](LICENSE)
+
 Spacetime Studio is a desktop admin client for [SpacetimeDB](https://spacetimedb.com/). It gives you a lightweight way to connect to a local or hosted SpacetimeDB instance, inspect schemas, browse and edit table data, run raw SQL, view reducers/functions, and tail database logs.
 
 Spacetime Studio supports Windows, macOS, and Linux. GitHub Actions builds installers for all three platforms whenever changes are pushed to `main`. Release installers are published on the [GitHub Releases page](https://github.com/ElegonCode/spacetime-studio/releases).
