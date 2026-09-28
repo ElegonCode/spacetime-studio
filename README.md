@@ -4,7 +4,7 @@
 
 Spacetime Studio is a desktop admin client for [SpacetimeDB](https://spacetimedb.com/). It gives you a lightweight way to connect to a local or hosted SpacetimeDB instance, inspect schemas, browse and edit table data, run raw SQL, view reducers/functions, and tail database logs.
 
-Windows builds are available from the GitHub Releases page. macOS and Linux builds are planned for a future release; for now, those platforms can build and run the app from source.
+Spacetime Studio supports Windows, macOS, and Linux. GitHub Actions builds installers for all three platforms whenever changes are pushed to `main`. Release installers are published on the [GitHub Releases page](https://github.com/ElegonCode/spacetime-studio/releases).
 
 ## What You Can Do
 
@@ -33,25 +33,25 @@ Windows builds are available from the GitHub Releases page. macOS and Linux buil
 
 ## Getting Started
 
-There are two intended ways to use Spacetime Studio:
+There are two ways to get Spacetime Studio:
 
-- **Download a release** for the easiest Windows setup.
-- **Build from source** if you are on macOS or Linux, want the latest development version, or want to contribute.
+- **Download a release** for the easiest setup on Windows, macOS, or Linux.
+- **Build from source** if you want to build locally, use the latest development version, or contribute.
 
 ### Option 1: Download A Release
 
-Windows installers are available from the repository's GitHub Releases page.
+Installers for Windows, macOS, and Linux are available from the repository's [GitHub Releases page](https://github.com/ElegonCode/spacetime-studio/releases). Choose the package for your operating system: Windows provides an `.msi` installer and a setup `.exe`, macOS provides a `.dmg`, and Linux provides `.deb` and AppImage packages.
 
 1. Open the repository's GitHub Releases page.
-2. Download the Windows installer from the latest release.
+2. Download the installer for your operating system from the latest release.
 3. Install Spacetime Studio.
 4. Launch the app and connect to your SpacetimeDB database.
 
-This path does not require Node.js, Rust, or compiling the project yourself. macOS and Linux release downloads will be added in a future release.
+This path does not require Node.js, Rust, or compiling the project yourself.
 
 ### Option 2: Build From Source
 
-Use this path if you want to run Spacetime Studio on macOS or Linux, use the latest development version, or contribute to the project.
+Use this path if you want to build and run Spacetime Studio locally on Windows, macOS, or Linux, use the latest development version, or contribute to the project.
 
 #### Prerequisites
 
