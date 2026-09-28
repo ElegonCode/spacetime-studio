@@ -24,6 +24,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
@@ -32,5 +33,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERBMkFDQkRBQTI2NDQ0QzkKUldUSlJHU2kyc3NxMmw3cnR0bEphWThkbDcvblVFTkE1ZDdrQ3pKT3hST21pOHp4YzI4Q3poT08K",
+      "endpoints": [
+        "https://github.com/ElegonCode/spacetime-studio/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

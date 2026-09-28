@@ -2,8 +2,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { NavigationMenuItem } from "@nuxt/ui";
 import { useRoute, useRouter } from "vue-router";
-import { openUrl } from "@tauri-apps/plugin-opener";
-import packageJson from "../package.json";
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import {
   pageRefreshHandler,
   pageRefreshLoading,
@@ -15,63 +15,57 @@ import ConnectionPicker from "./components/ConnectionPicker.vue";
 const open = ref(true);
 const route = useRoute();
 const router = useRouter();
-const availableRelease = ref<{ version: string; url: string } | null>(null);
+const availableUpdate = ref<Update | null>(null);
+const updateProgress = ref<number | null>(null);
+const updateError = ref(false);
+const installingUpdate = ref(false);
 let releaseCheckTimer: ReturnType<typeof setInterval> | undefined;
+let checkingForUpdate = false;
 
-function compareVersions(left: string, right: string): number {
-  const parse = (version: string) => {
-    const match = version.replace(/^v/i, "").match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/);
-    if (!match) return null;
-    return {
-      core: match.slice(1, 4).map(Number),
-      prerelease: match[4]?.split(".") ?? null,
-    };
-  };
-  const a = parse(left);
-  const b = parse(right);
-  if (!a || !b) return 0;
-  for (let index = 0; index < 3; index += 1) {
-    if (a.core[index] !== b.core[index]) return a.core[index] - b.core[index];
+async function checkForUpdate() {
+  if (checkingForUpdate) return;
+  checkingForUpdate = true;
+  try {
+    const update = await check();
+    availableUpdate.value = update;
+  } catch {
+    // Offline or unavailable update feeds should not interrupt the workspace.
+  } finally {
+    checkingForUpdate = false;
   }
-  if (!a.prerelease && b.prerelease) return 1;
-  if (a.prerelease && !b.prerelease) return -1;
-  if (!a.prerelease || !b.prerelease) return 0;
-  for (let index = 0; index < Math.max(a.prerelease.length, b.prerelease.length); index += 1) {
-    const aPart = a.prerelease[index];
-    const bPart = b.prerelease[index];
-    if (aPart === undefined) return -1;
-    if (bPart === undefined) return 1;
-    if (aPart === bPart) continue;
-    const aNumber = /^\d+$/.test(aPart) ? Number(aPart) : null;
-    const bNumber = /^\d+$/.test(bPart) ? Number(bPart) : null;
-    if (aNumber !== null && bNumber !== null) return aNumber - bNumber;
-    if (aNumber !== null) return -1;
-    if (bNumber !== null) return 1;
-    return aPart.localeCompare(bPart);
-  }
-  return 0;
 }
 
-async function checkForRelease() {
+async function installUpdate() {
+  if (!availableUpdate.value || installingUpdate.value) return;
+  installingUpdate.value = true;
+  updateError.value = false;
+  let downloaded = 0;
+  let contentLength = 0;
   try {
-    const response = await fetch(
-      "https://api.github.com/repos/ElegonCode/spacetime-studio/releases/latest",
-      { headers: { Accept: "application/vnd.github+json" } },
-    );
-    if (!response.ok) return;
-    const release = (await response.json()) as { tag_name?: string; html_url?: string };
-    if (
-      release.tag_name &&
-      release.html_url &&
-      compareVersions(release.tag_name, packageJson.version) > 0
-    ) {
-      availableRelease.value = { version: release.tag_name.replace(/^v/i, ""), url: release.html_url };
-    } else {
-      availableRelease.value = null;
-    }
+    await availableUpdate.value.downloadAndInstall((event) => {
+      if (event.event === "Started") {
+        contentLength = event.data.contentLength ?? 0;
+        updateProgress.value = 0;
+      } else if (event.event === "Progress") {
+        downloaded += event.data.chunkLength;
+        updateProgress.value = contentLength > 0
+          ? Math.min(100, Math.round((downloaded / contentLength) * 100))
+          : null;
+      } else if (event.event === "Finished") {
+        updateProgress.value = 100;
+      }
+    });
+    await relaunch();
   } catch {
-    // A failed or offline check should not interrupt the workspace.
+    updateError.value = true;
+    installingUpdate.value = false;
+    updateProgress.value = null;
   }
+}
+
+async function dismissUpdate() {
+  await availableUpdate.value?.close();
+  availableUpdate.value = null;
 }
 
 const { selectedId, selectedConnection, canAccess, loadConnections } = useConnections();
@@ -94,12 +88,13 @@ watch(canAccess, (allowed) => {
 
 onMounted(() => {
   loadConnections();
-  void checkForRelease();
-  releaseCheckTimer = setInterval(() => void checkForRelease(), 6 * 60 * 60 * 1000);
+  void checkForUpdate();
+  releaseCheckTimer = setInterval(() => void checkForUpdate(), 6 * 60 * 60 * 1000);
 });
 
 onUnmounted(() => {
   if (releaseCheckTimer) clearInterval(releaseCheckTimer);
+  void availableUpdate.value?.close();
 });
 
 const pageHeaders: Record<string, { title: string; description: string }> = {
@@ -187,37 +182,40 @@ const items = computed<NavigationMenuItem[]>(() =>
 
         <template #footer="{ state }">
           <div class="flex w-full flex-col gap-1">
-            <div v-if="availableRelease">
+            <div v-if="availableUpdate">
               <UAlert
                 v-if="state !== 'collapsed'"
-                color="success"
+                color="primary"
                 variant="subtle"
                 icon="i-lucide-download"
-                :title="`Update ${availableRelease.version} available`"
-                description="A new version of Spacetime Studio is ready to download."
+                :title="updateError ? 'Update failed' : `Update ${availableUpdate.version} available`"
+                :description="updateError ? 'The update could not be installed. Try again later.' : updateProgress !== null ? `Downloading update: ${updateProgress}%` : 'A new version is ready to install.'"
                 :ui="{ root: 'items-start' }"
               >
                 <template #actions>
                   <UButton
                     size="xs"
-                    color="success"
+                    color="primary"
                     variant="soft"
-                    icon="i-lucide-external-link"
-                    @click="openUrl(availableRelease!.url)"
+                    icon="i-lucide-download"
+                    :loading="installingUpdate"
+                    :disabled="installingUpdate"
+                    @click="installUpdate"
                   >
-                    View release
+                    {{ updateError ? 'Retry update' : updateProgress !== null ? 'Installing' : 'Update now' }}
                   </UButton>
+                  <UButton size="xs" color="neutral" variant="ghost" :disabled="installingUpdate" @click="dismissUpdate">Later</UButton>
                 </template>
               </UAlert>
               <UButton
                 v-else
                 class="mx-auto flex"
-                color="success"
+                color="primary"
                 variant="soft"
                 icon="i-lucide-download"
                 aria-label="New update available"
-                :title="`Update ${availableRelease.version} available`"
-                @click="openUrl(availableRelease!.url)"
+                :title="`Update ${availableUpdate.version} available`"
+                @click="open = true"
               />
             </div>
             <div class="flex justify-end">
