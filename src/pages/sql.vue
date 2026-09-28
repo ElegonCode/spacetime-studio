@@ -13,7 +13,7 @@ import {
   clearPageRefreshHandler,
   setPageRefreshHandler,
 } from "../lib/pageActions";
-import { dataTableUi } from "../lib/tableUi";
+import { dataTableUi, selectedCellUi } from "../lib/tableUi";
 import { useConnections } from "../lib/connectionStore";
 
 const HISTORY_KEY = "spacetime-studio:sql-history";
@@ -235,6 +235,15 @@ onUnmounted(() => clearPageRefreshHandler(run));
         class="min-h-0 flex-1"
         :ui="dataTableUi"
       >
+        <template
+          v-for="(column, index) in current?.columns ?? []"
+          :key="`c${index}`"
+          #[`c${index}-cell`]="{ row }"
+        >
+          <div :tabindex="0" :class="selectedCellUi">
+            {{ formatCell(row.original[index], column.kind) }}
+          </div>
+        </template>
         <template #empty>No rows returned.</template>
       </UTable>
     </div>

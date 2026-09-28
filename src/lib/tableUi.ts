@@ -16,3 +16,8 @@ export const dataTableUi = {
   separator: "hidden",
   empty: "px-3 py-6 text-left text-muted",
 };
+
+// A cell receives keyboard focus when clicked. Keep the selection treatment
+// on the inner cell content so it works for both default and custom slots.
+export const selectedCellUi =
+  "relative -mx-3 -my-2 min-h-9 px-3 py-2 outline-none focus:bg-success/10 focus:text-success focus:shadow-[inset_0_0_0_1px_var(--ui-color-success-500)] focus-within:bg-success/10 focus-within:text-success focus-within:shadow-[inset_0_0_0_1px_var(--ui-color-success-500)]";

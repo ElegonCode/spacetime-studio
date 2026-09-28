@@ -21,7 +21,7 @@ import {
   clearPageRefreshHandler,
   setPageRefreshHandler,
 } from "../lib/pageActions";
-import { dataTableUi } from "../lib/tableUi";
+import { dataTableUi, selectedCellUi } from "../lib/tableUi";
 import { useConnections } from "../lib/connectionStore";
 import ConnectionEmptyState from "../components/ConnectionEmptyState.vue";
 
@@ -39,7 +39,6 @@ const loadingRows = ref(false);
 const savingRow = ref(false);
 const exporting = ref(false);
 const error = ref("");
-const status = ref("");
 type RowFormValue = string | boolean;
 
 const rowForm = ref<Record<string, RowFormValue>>({});
@@ -54,6 +53,9 @@ const tableSearch = ref("");
 // by column. The loaded rows themselves are never mutated, so they still
 // identify the original record when the edit is saved.
 const drafts = ref<Record<number, Record<string, string>>>({});
+const pendingEditCount = computed(() =>
+  Object.values(drafts.value).reduce((total, rowDraft) => total + Object.keys(rowDraft).length, 0),
+);
 
 const readOnly = computed(() => selectedConnection.value?.readOnly ?? false);
 
@@ -75,6 +77,7 @@ function toTabItem(table: TableSummary): TabsItem {
     label: table.name,
     value: table.name,
     icon: table.scheduledReducer ? "i-lucide-timer" : "i-lucide-table",
+    disabled: pendingEditCount.value > 0 && table.name !== selectedTableName.value,
   };
 }
 
@@ -194,22 +197,49 @@ function isDirty(index: number, columnName?: string) {
   return columnName ? columnName in rowDraft : true;
 }
 
-function discardDraft(index: number) {
-  const next = { ...drafts.value };
-  delete next[index];
-  drafts.value = next;
+function undoPendingEdits() {
+  drafts.value = {};
 }
 
-async function saveDraft(index: number, row: Row) {
-  const rowDraft = drafts.value[index];
-  if (!rowDraft) return;
+async function savePendingEdits() {
+  if (!connectionId.value || !selectedTableName.value || !pendingEditCount.value || savingRow.value) return;
 
-  const changes = Object.fromEntries(
-    pageColumns.value
-      .filter((column) => column.name in rowDraft)
-      .map((column) => [column.name, parseInput(rowDraft[column.name], column)]),
-  );
-  await persist(() => updateRow(connectionId.value!, selectedTableName.value, row, changes), "Row updated.");
+  const totalEdits = pendingEditCount.value;
+  const pendingRows = Object.entries(drafts.value);
+  savingRow.value = true;
+  error.value = "";
+
+  try {
+    for (const [indexText, rowDraft] of pendingRows) {
+      const index = Number(indexText);
+      const row = tablePage.value?.rows[index];
+      if (!row) throw new Error("A row with pending edits is no longer on this page. Reload the table before saving.");
+
+      const changes = Object.fromEntries(
+        pageColumns.value
+          .filter((column) => column.name in rowDraft)
+          .map((column) => [column.name, parseInput(rowDraft[column.name], column)]),
+      );
+      await updateRow(connectionId.value, selectedTableName.value, row, changes);
+
+      const next = { ...drafts.value };
+      delete next[index];
+      drafts.value = next;
+    }
+
+    toast.add({
+      title: `${totalEdits} ${totalEdits === 1 ? "edit" : "edits"} saved`,
+      color: "success",
+      icon: "i-lucide-check",
+    });
+    await loadRows();
+  } catch (err) {
+    const message = String(err);
+    await loadRows(true);
+    error.value = `Some edits could not be saved. The remaining edits are still pending. ${message}`;
+  } finally {
+    savingRow.value = false;
+  }
 }
 
 // Slide-over editor ------------------------------------------------------
@@ -313,11 +343,10 @@ async function persist(action: () => Promise<void>, success: string) {
 
   savingRow.value = true;
   error.value = "";
-  status.value = "";
 
   try {
     await action();
-    status.value = success;
+    toast.add({ title: success, color: "success", icon: "i-lucide-check" });
     await loadRows();
   } catch (err) {
     error.value = String(err);
@@ -333,7 +362,6 @@ function clearSchema() {
   tablePage.value = null;
   selectedTableName.value = "";
   error.value = "";
-  status.value = "";
 }
 
 async function loadSchema() {
@@ -369,7 +397,7 @@ async function loadSchema() {
   }
 }
 
-async function loadRows() {
+async function loadRows(preserveDrafts = false) {
   if (!connectionId.value || !selectedTableName.value) return;
 
   loadingRows.value = true;
@@ -383,7 +411,7 @@ async function loadRows() {
       pageSize.value,
       activeWhereSql.value.trim() || undefined,
     );
-    drafts.value = {};
+    if (!preserveDrafts) drafts.value = {};
   } catch (err) {
     error.value = String(err);
   } finally {
@@ -413,11 +441,13 @@ async function exportRows(format: ExportFormat) {
 }
 
 function goToPage(next: number) {
+  if (pendingEditCount.value) return;
   page.value = next;
   loadRows();
 }
 
 function submitWhere() {
+  if (pendingEditCount.value) return;
   activeWhereSql.value = whereSql.value.trim();
   page.value = 0;
   loadRows();
@@ -430,7 +460,6 @@ watch(selectedTableName, () => {
   rowForm.value = {};
   originalRow.value = null;
   rowEditorOpen.value = false;
-  status.value = "";
   loadRows();
 });
 
@@ -472,16 +501,6 @@ onUnmounted(() => {
       close
       @update:open="error = ''"
     />
-    <UAlert
-      v-if="status"
-      color="success"
-      variant="subtle"
-      :description="status"
-      class="shrink-0"
-      close
-      @update:open="status = ''"
-    />
-
     <div class="grid min-h-0 flex-1 xl:grid-cols-[250px_1fr]">
       <aside class="flex min-h-0 flex-col bg-default/30">
         <div class="shrink-0 p-2">
@@ -592,58 +611,74 @@ onUnmounted(() => {
                 placeholder="WHERE"
                 class="w-32 sm:w-48"
                 aria-label="WHERE query"
+                :disabled="pendingEditCount > 0"
               />
-              <UButton
-                icon="i-lucide-search"
-                color="neutral"
-                variant="soft"
-                type="submit"
-                :loading="loadingRows"
-              />
+              <UTooltip text="Apply filter">
+                <UButton
+                  icon="i-lucide-search"
+                  color="neutral"
+                  variant="soft"
+                  type="submit"
+                  :loading="loadingRows"
+                  :disabled="pendingEditCount > 0"
+                  aria-label="Apply filter"
+                />
+              </UTooltip>
             </UFieldGroup>
-            <USelect
-              v-model="pageSize"
-              :items="[10, 25, 50, 100]"
-              class="w-24"
-              aria-label="Page size"
-            />
-            <UButton
-              icon="i-lucide-chevron-left"
-              color="neutral"
-              variant="soft"
-              type="button"
-              :disabled="page === 0"
-              aria-label="Previous page"
-              @click="goToPage(page - 1)"
-            />
-            <UButton
-              icon="i-lucide-chevron-right"
-              color="neutral"
-              variant="soft"
-              type="button"
-              :disabled="!tablePage?.hasMore"
-              aria-label="Next page"
-              @click="goToPage(page + 1)"
-            />
-            <UDropdownMenu :items="exportItems">
+            <UTooltip text="Rows per page">
+              <USelect
+                v-model="pageSize"
+                :items="[10, 25, 50, 100]"
+                class="w-24"
+                aria-label="Page size"
+                :disabled="pendingEditCount > 0"
+              />
+            </UTooltip>
+            <UTooltip text="Previous page">
               <UButton
-                icon="i-lucide-download"
+                icon="i-lucide-chevron-left"
                 color="neutral"
                 variant="soft"
                 type="button"
-                :loading="exporting"
-                :disabled="!selectedTableName"
-                aria-label="Export rows"
+                :disabled="page === 0 || pendingEditCount > 0"
+                aria-label="Previous page"
+                @click="goToPage(page - 1)"
               />
-            </UDropdownMenu>
-            <UButton
-              v-if="!readOnly"
-              icon="i-lucide-plus"
-              type="button"
-              :disabled="!selectedTable"
-              @click="newRow"
-              >New Row</UButton
-            >
+            </UTooltip>
+            <UTooltip text="Next page">
+              <UButton
+                icon="i-lucide-chevron-right"
+                color="neutral"
+                variant="soft"
+                type="button"
+                :disabled="!tablePage?.hasMore || pendingEditCount > 0"
+                aria-label="Next page"
+                @click="goToPage(page + 1)"
+              />
+            </UTooltip>
+            <UTooltip text="Export as CSV or JSON">
+              <span class="inline-flex">
+                <UDropdownMenu :items="exportItems">
+                  <UButton
+                    icon="i-lucide-download"
+                    color="neutral"
+                    variant="soft"
+                    type="button"
+                    :loading="exporting"
+                    :disabled="!selectedTableName"
+                    aria-label="Export rows"
+                  />
+                </UDropdownMenu>
+              </span>
+            </UTooltip>
+            <UTooltip v-if="!readOnly" text="New row">
+              <UButton
+                icon="i-lucide-plus"
+                type="button"
+                :disabled="!selectedTable || pendingEditCount > 0"
+                @click="newRow"
+              >New Row</UButton>
+            </UTooltip>
           </form>
         </div>
 
@@ -656,15 +691,22 @@ onUnmounted(() => {
           class="m-2 shrink-0"
         />
 
-        <UTable
-          :data="tablePage?.rows ?? []"
-          :columns="rowColumns"
-          :loading="loadingRows"
-          sticky="header"
-          :column-pinning="{ right: ['actions'] }"
-          class="min-h-0 flex-1"
-          :ui="{ ...dataTableUi, empty: loadingRows ? 'hidden' : dataTableUi.empty }"
-        >
+        <div class="relative flex min-h-0 flex-1 flex-col">
+          <UTable
+            :data="tablePage?.rows ?? []"
+            :columns="rowColumns"
+            :loading="loadingRows"
+            sticky="header"
+            :column-pinning="{ right: ['actions'] }"
+            class="min-h-0 flex-1"
+            :ui="{
+              ...dataTableUi,
+              tbody: pendingEditCount
+                ? `${dataTableUi.tbody} after:table-row after:h-28 after:content-['']`
+                : dataTableUi.tbody,
+              empty: loadingRows ? 'hidden' : dataTableUi.empty,
+            }"
+          >
           <template
             v-for="column in pageColumns"
             :key="column.name"
@@ -687,78 +729,96 @@ onUnmounted(() => {
             :key="column.name"
             #[`${column.name}-cell`]="{ row }"
           >
-            <template v-if="isEditable(column) && !readOnly">
-              <UCheckbox
-                v-if="column.kind === 'bool'"
-                class="px-2 py-1"
-                :model-value="draftText(row.index, row.original, column) === 'true'"
-                @update:model-value="setDraft(row.index, row.original, column, String($event === true))"
-              />
-              <input
+            <div :tabindex="0" :class="selectedCellUi">
+              <template v-if="isEditable(column) && !readOnly">
+                <UCheckbox
+                  v-if="column.kind === 'bool'"
+                  :disabled="savingRow"
+                  :model-value="draftText(row.index, row.original, column) === 'true'"
+                  @update:model-value="setDraft(row.index, row.original, column, String($event === true))"
+                />
+                <input
+                  v-else
+                  class="absolute inset-0 h-full w-full border-0 bg-transparent px-3 py-2 text-inherit outline-none ring-0 focus:border-0 focus:bg-transparent focus:ring-0"
+                  :class="isDirty(row.index, column.name) ? 'bg-warning/5' : ''"
+                  :value="draftText(row.index, row.original, column)"
+                  :disabled="savingRow"
+                  @input="setDraft(row.index, row.original, column, ($event.target as HTMLInputElement).value)"
+                />
+              </template>
+              <span
                 v-else
-                class="w-full rounded border bg-transparent px-2 py-1 text-highlighted outline-none focus:border-primary focus:bg-default"
-                :class="isDirty(row.index, column.name) ? 'border-warning/60 bg-warning/5' : 'border-transparent'"
-                :value="draftText(row.index, row.original, column)"
-                @input="setDraft(row.index, row.original, column, ($event.target as HTMLInputElement).value)"
-                @keydown.enter="saveDraft(row.index, row.original)"
-                @keydown.escape="discardDraft(row.index)"
-              />
-            </template>
-            <span
-              v-else
-              class="block max-w-md truncate px-2 py-1 text-highlighted"
-              :title="formatCell(row.original[column.name], column.kind)"
-            >
-              {{ formatCell(row.original[column.name], column.kind) }}
-            </span>
+                class="block max-w-md truncate text-highlighted"
+                :title="formatCell(row.original[column.name], column.kind)"
+              >
+                {{ formatCell(row.original[column.name], column.kind) }}
+              </span>
+            </div>
           </template>
 
           <template #actions-cell="{ row }">
-            <template v-if="!readOnly">
+            <UTooltip :text="readOnly ? 'View row' : 'Edit row'">
               <UButton
-                icon="i-lucide-save"
-                size="xs"
-                variant="ghost"
-                aria-label="Save row"
-                title="Save changes (Enter)"
-                :disabled="!isDirty(row.index)"
-                :loading="savingRow && isDirty(row.index)"
-                @click="saveDraft(row.index, row.original)"
-              />
-              <UButton
-                icon="i-lucide-undo-2"
+                :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-file-pen-line'"
                 size="xs"
                 color="neutral"
                 variant="ghost"
-                aria-label="Discard changes"
-                title="Discard changes (Esc)"
-                :disabled="!isDirty(row.index)"
-                @click="discardDraft(row.index)"
+                :aria-label="readOnly ? 'View row' : 'Edit row'"
+                :disabled="pendingEditCount > 0"
+                @click="editRow(row.original)"
               />
-            </template>
-            <UButton
-              :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-file-pen-line'"
-              size="xs"
-              color="neutral"
-              variant="ghost"
-              :aria-label="readOnly ? 'View row' : 'Edit row'"
-              @click="editRow(row.original)"
-            />
-            <UButton
-              v-if="!readOnly"
-              icon="i-lucide-trash-2"
-              size="xs"
-              color="error"
-              variant="ghost"
-              aria-label="Delete row"
-              @click="pendingDelete = row.original"
-            />
+            </UTooltip>
+            <UTooltip v-if="!readOnly" text="Delete row">
+              <UButton
+                icon="i-lucide-trash-2"
+                size="xs"
+                color="error"
+                variant="ghost"
+                aria-label="Delete row"
+                :disabled="pendingEditCount > 0"
+                @click="pendingDelete = row.original"
+              />
+            </UTooltip>
           </template>
 
           <template #empty>
             {{ activeWhereSql ? "No rows match this filter." : "This table is empty." }}
           </template>
-        </UTable>
+          </UTable>
+
+          <div
+            v-if="pendingEditCount && !readOnly"
+            role="status"
+            aria-live="polite"
+            class="absolute bottom-4 left-1/2 z-20 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-3 whitespace-nowrap rounded-full border border-default/80 bg-default/85 px-4 py-2 shadow-xl backdrop-blur-xl"
+          >
+            <span class="text-sm font-medium text-highlighted">
+              {{ pendingEditCount }} {{ pendingEditCount === 1 ? "edit" : "edits" }}
+            </span>
+            <span class="h-5 w-px bg-default" aria-hidden="true" />
+            <UTooltip text="Undo edits">
+              <UButton
+                color="neutral"
+                variant="ghost"
+                size="sm"
+                :disabled="savingRow"
+                @click="undoPendingEdits"
+              >
+                Undo
+              </UButton>
+            </UTooltip>
+            <UTooltip text="Save edits">
+              <UButton
+                icon="i-lucide-save"
+                size="sm"
+                :loading="savingRow"
+                @click="savePendingEdits"
+              >
+                Save changes
+              </UButton>
+            </UTooltip>
+          </div>
+        </div>
       </section>
     </div>
 
