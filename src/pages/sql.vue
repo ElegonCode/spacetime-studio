@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import type { TableColumn } from "@nuxt/ui";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useToast } from "@nuxt/ui/composables";
 import {
   executeSql,
   exportRows,
+  getSchema,
   getSelectedConnectionId,
   type ExportFormat,
   type SqlStatementResult,
+  type TableSummary,
 } from "../lib/spacetime";
 import { formatCell } from "../lib/cells";
 import {
@@ -16,6 +18,7 @@ import {
 } from "../lib/pageActions";
 import { dataTableUi, selectedCellUi } from "../lib/tableUi";
 import { useConnections } from "../lib/connectionStore";
+import SqlCodeEditor from "../components/SqlCodeEditor.vue";
 
 const HISTORY_KEY = "spacetime-studio:sql-history";
 const HISTORY_LIMIT = 25;
@@ -25,13 +28,16 @@ const toast = useToast();
 
 const query = ref("SELECT * FROM ");
 const running = ref(false);
-const error = ref("");
 const results = ref<SqlStatementResult[]>([]);
 const ranAt = ref<string>("");
 const activeResult = ref("0");
 const history = ref<string[]>(loadHistory());
+const schemaTables = ref<TableSummary[]>([]);
 
 const readOnly = computed(() => selectedConnection.value?.readOnly ?? false);
+const sqlHelp = computed(() =>
+  `${readOnly.value ? "Read-only connections allow SELECT, SHOW, and EXPLAIN." : "INSERT, UPDATE, and DELETE run immediately."} SpacetimeDB SQL has a limited dialect. Use Ctrl+Space for supported keywords, tables, and columns. Separate statements with semicolons.`,
+);
 
 function loadHistory(): string[] {
   try {
@@ -77,9 +83,14 @@ const current = computed<SqlStatementResult | null>(
 const tableColumns = computed<TableColumn<unknown[]>[]>(() =>
   (current.value?.columns ?? []).map((column, index) => ({
     id: `c${index}`,
-    header: `${column.name} (${column.type})`,
+    header: column.name,
     accessorFn: (row) => formatCell(row[index], column.kind),
-    meta: { class: { th: "whitespace-nowrap border-r border-default", td: "border-r border-default/60 font-mono" } },
+    meta: {
+      class: {
+        th: "whitespace-nowrap border-r border-default",
+        td: "min-w-40 border-r border-default/60 align-top",
+      },
+    },
   })),
 );
 
@@ -94,7 +105,6 @@ async function run() {
   if (!connectionId || !sql || running.value) return;
 
   running.value = true;
-  error.value = "";
 
   try {
     const response = await executeSql(connectionId, sql);
@@ -103,7 +113,12 @@ async function run() {
     ranAt.value = new Date().toLocaleTimeString();
     remember(sql);
   } catch (err) {
-    error.value = String(err);
+    toast.add({
+      title: "SQL query failed",
+      description: String(err),
+      color: "error",
+      icon: "i-lucide-circle-alert",
+    });
   } finally {
     running.value = false;
   }
@@ -130,63 +145,37 @@ function onKeydown(event: KeyboardEvent) {
 
 onMounted(() => setPageRefreshHandler(run));
 onUnmounted(() => clearPageRefreshHandler(run));
+
+watch(
+  () => selectedConnection.value?.id,
+  async (connectionId) => {
+    schemaTables.value = [];
+    if (!connectionId) return;
+    try {
+      const schema = await getSchema(connectionId);
+      if (selectedConnection.value?.id === connectionId) {
+        schemaTables.value = schema.tables;
+      }
+    } catch {
+      // Keep the editor usable even if schema introspection is unavailable.
+    }
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col gap-3 p-4">
-    <div class="shrink-0 space-y-2">
-      <UTextarea
+  <div class="grid h-full min-h-0 grid-rows-2">
+    <section class="min-h-0 border-b border-default">
+      <SqlCodeEditor
         v-model="query"
-        :rows="6"
-        autoresize
-        :maxrows="16"
-        class="w-full"
-        :ui="{ base: 'font-mono text-sm' }"
-        placeholder="SELECT * FROM my_table WHERE id = 1"
-        aria-label="SQL query"
+        :tables="schemaTables"
         @keydown="onKeydown"
       />
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <p class="text-xs text-muted">
-          <UIcon v-if="readOnly" name="i-lucide-lock" class="mr-1 size-3 align-[-2px]" />
-          {{
-            readOnly
-              ? "Read-only connection: only SELECT, SHOW and EXPLAIN statements will run."
-              : "Writes (INSERT, UPDATE, DELETE) run immediately against the database."
-          }}
-          Separate statements with <code>;</code>.
-        </p>
-        <div class="flex items-center gap-2">
-          <UDropdownMenu :items="historyItems" :content="{ align: 'end' }">
-            <UButton
-              icon="i-lucide-history"
-              color="neutral"
-              variant="soft"
-              :disabled="!history.length"
-              aria-label="Query history"
-              title="Query history"
-            />
-          </UDropdownMenu>
-          <UButton icon="i-lucide-play" :loading="running" @click="run">
-            Run
-            <UKbd value="ctrl" size="sm" class="ml-1" /><UKbd value="enter" size="sm" />
-          </UButton>
-        </div>
-      </div>
-    </div>
+    </section>
 
-    <UAlert
-      v-if="error"
-      color="error"
-      variant="subtle"
-      :description="error"
-      class="shrink-0"
-    />
-
-    <div
-      v-if="results.length"
-      class="flex min-h-0 flex-1 flex-col rounded-md border border-default bg-default/30"
-    >
+    <section class="flex min-h-0 flex-col">
+      <div v-if="results.length" class="flex min-h-0 flex-1 flex-col">
       <div class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-default p-2">
         <UTabs
           v-if="results.length > 1"
@@ -228,32 +217,74 @@ onUnmounted(() => clearPageRefreshHandler(run));
       <p v-if="current && !current.columns.length" class="p-3 text-sm text-muted">
         Statement ran successfully and returned no result set.
       </p>
+      <div v-else class="min-h-0 min-w-0 flex-1 overflow-auto">
       <UTable
-        v-else
         :data="current?.rows ?? []"
         :columns="tableColumns"
         sticky="header"
-        class="min-h-0 flex-1"
+        class="min-w-max"
         :ui="dataTableUi"
       >
         <template
           v-for="(column, index) in current?.columns ?? []"
           :key="`c${index}`"
+          #[`c${index}-header`]
+        >
+          <span class="inline-flex items-center gap-1">
+            {{ column.name }}
+            <span class="font-normal">({{ column.type }})</span>
+          </span>
+        </template>
+        <template
+          v-for="(column, index) in current?.columns ?? []"
+          :key="`c${index}-cell`"
           #[`c${index}-cell`]="{ row }"
         >
-          <div :tabindex="0" :class="selectedCellUi">
-            {{ formatCell(row.original[index], column.kind) }}
+          <div :tabindex="0" :class="selectedCellUi" class="max-w-md">
+            <span
+              class="block truncate text-highlighted"
+              :title="formatCell(row.original[index], column.kind)"
+            >
+              {{ formatCell(row.original[index], column.kind) }}
+            </span>
           </div>
         </template>
         <template #empty>No rows returned.</template>
       </UTable>
-    </div>
+      </div>
+      </div>
 
-    <div
-      v-else-if="!error"
-      class="flex flex-1 items-center justify-center rounded-md border border-dashed border-default text-sm text-muted"
-    >
-      Run a query to see results here.
-    </div>
+      <div
+        v-else
+        class="flex min-h-0 flex-1 items-center justify-center text-sm text-muted"
+      >
+        Run a query to see results here.
+      </div>
+    </section>
+
+    <Teleport to="#page-header-actions">
+      <UTooltip :text="sqlHelp">
+        <UButton
+          icon="i-lucide-circle-help"
+          color="neutral"
+          variant="ghost"
+          aria-label="SQL editor help"
+        />
+      </UTooltip>
+      <UDropdownMenu :items="historyItems" :content="{ align: 'end' }">
+        <UButton
+          icon="i-lucide-history"
+          color="neutral"
+          variant="soft"
+          :disabled="!history.length"
+          aria-label="Query history"
+          title="Query history"
+        />
+      </UDropdownMenu>
+      <UButton icon="i-lucide-play" :loading="running" @click="run">
+        Run
+        <UKbd value="ctrl" size="sm" class="ml-1" /><UKbd value="enter" size="sm" />
+      </UButton>
+    </Teleport>
   </div>
 </template>

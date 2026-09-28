@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { NavigationMenuItem } from "@nuxt/ui";
-import { defineShortcuts } from "@nuxt/ui/composables";
 import { useRoute, useRouter } from "vue-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import packageJson from "../package.json";
@@ -133,10 +132,6 @@ const pageHeader = computed(
     },
 );
 
-defineShortcuts({
-  o: () => (open.value = !open.value),
-});
-
 const baseItems: NavigationMenuItem[] = [
   {
     label: "Tables",
@@ -173,7 +168,13 @@ const items = computed<NavigationMenuItem[]>(() =>
 <template>
   <UApp :toaster="{ position: 'bottom-right', progress: true, duration: 4000 }">
     <div class="flex h-screen min-h-0 bg-neutral-950">
-      <USidebar v-model:open="open" title="Spacetime Studio" collapsible="icon" class="select-none">
+      <USidebar
+        v-model:open="open"
+        title="Spacetime Studio"
+        collapsible="icon"
+        class="select-none"
+        :ui="{ footer: 'p-1' }"
+      >
         <template #default="{ state }">
           <ConnectionPicker :collapsed="state === 'collapsed'" />
 
@@ -185,38 +186,51 @@ const items = computed<NavigationMenuItem[]>(() =>
         </template>
 
         <template #footer="{ state }">
-          <div v-if="availableRelease" class="w-full p-2">
-            <UAlert
-              v-if="state !== 'collapsed'"
-              color="success"
-              variant="subtle"
-              icon="i-lucide-download"
-              :title="`Update ${availableRelease.version} available`"
-              description="A new version of Spacetime Studio is ready to download."
-              :ui="{ root: 'items-start' }"
-            >
-              <template #actions>
-                <UButton
-                  size="xs"
-                  color="success"
-                  variant="soft"
-                  icon="i-lucide-external-link"
-                  @click="openUrl(availableRelease!.url)"
-                >
-                  View release
-                </UButton>
-              </template>
-            </UAlert>
-            <UButton
-              v-else
-              class="mx-auto flex"
-              color="success"
-              variant="soft"
-              icon="i-lucide-download"
-              aria-label="New update available"
-              :title="`Update ${availableRelease.version} available`"
-              @click="openUrl(availableRelease!.url)"
-            />
+          <div class="flex w-full flex-col gap-1">
+            <div v-if="availableRelease">
+              <UAlert
+                v-if="state !== 'collapsed'"
+                color="success"
+                variant="subtle"
+                icon="i-lucide-download"
+                :title="`Update ${availableRelease.version} available`"
+                description="A new version of Spacetime Studio is ready to download."
+                :ui="{ root: 'items-start' }"
+              >
+                <template #actions>
+                  <UButton
+                    size="xs"
+                    color="success"
+                    variant="soft"
+                    icon="i-lucide-external-link"
+                    @click="openUrl(availableRelease!.url)"
+                  >
+                    View release
+                  </UButton>
+                </template>
+              </UAlert>
+              <UButton
+                v-else
+                class="mx-auto flex"
+                color="success"
+                variant="soft"
+                icon="i-lucide-download"
+                aria-label="New update available"
+                :title="`Update ${availableRelease.version} available`"
+                @click="openUrl(availableRelease!.url)"
+              />
+            </div>
+            <div class="flex justify-end">
+              <UButton
+                size="xs"
+                :icon="open ? 'i-lucide-panel-left-close' : 'i-lucide-panel-left-open'"
+                color="neutral"
+                variant="ghost"
+                :aria-label="open ? 'Collapse sidebar' : 'Expand sidebar'"
+                :title="open ? 'Collapse sidebar' : 'Expand sidebar'"
+                @click="open = !open"
+              />
+            </div>
           </div>
         </template>
       </USidebar>
@@ -225,13 +239,6 @@ const items = computed<NavigationMenuItem[]>(() =>
         <div
           class="h-(--ui-header-height) shrink-0 flex items-center gap-3 px-4 border-b border-default"
         >
-          <UButton
-            icon="i-lucide-panel-left"
-            color="neutral"
-            variant="ghost"
-            :aria-label="open ? 'Close sidebar' : 'Open sidebar'"
-            @click="() => { open = !open }"
-          />
           <div class="min-w-0 flex-1 select-none">
             <p class="truncate text-sm font-medium text-highlighted">
               {{ pageHeader.title }}
@@ -240,6 +247,7 @@ const items = computed<NavigationMenuItem[]>(() =>
               {{ pageHeader.description }}
             </p>
           </div>
+          <div id="page-header-actions" class="flex min-w-0 items-center gap-2" />
           <UBadge
             v-if="selectedConnection?.readOnly"
             color="neutral"
