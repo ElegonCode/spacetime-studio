@@ -31,6 +31,7 @@ const toast = useToast();
 
 const TABLE_TABS_KEY = "spacetime-studio:table-tabs";
 const TABLE_SIDEBAR_WIDTH_KEY = "spacetime-studio:table-sidebar-width";
+const showcaseMode = import.meta.env.DEV && new URLSearchParams(location.search).has("showcase");
 const TABLE_SIDEBAR_MIN_WIDTH = 160;
 const TABLE_SIDEBAR_MAX_WIDTH = 480;
 
@@ -1265,7 +1266,8 @@ onUnmounted(() => {
             v-if="pendingEditCount && !readOnly"
             role="status"
             aria-live="polite"
-            class="absolute bottom-4 left-1/2 z-20 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-3 whitespace-nowrap rounded-full border border-default/80 bg-default/85 px-4 py-2 shadow-xl backdrop-blur-xl"
+            :class="[showcaseMode ? '' : 'absolute bottom-4 left-1/2 z-20', 'flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-3 whitespace-nowrap rounded-full border border-default/80 bg-default/85 px-4 py-2 shadow-xl backdrop-blur-xl']"
+            :style="showcaseMode ? { position: 'fixed', bottom: '24px', left: 'calc(50% + 222px)', zIndex: 1000 } : undefined"
           >
             <span class="text-sm font-medium text-highlighted">
               {{ pendingEditCount }} {{ pendingEditCount === 1 ? "edit" : "edits" }}

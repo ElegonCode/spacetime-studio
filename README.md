@@ -1,4 +1,4 @@
-![Spacetime Studio banner](https://raw.githubusercontent.com/ElegonCode/spacetime-studio/main/public/screenshot.png)
+![Spacetime Studio banner](https://raw.githubusercontent.com/ElegonCode/spacetime-studio/main/public/readme-banner.png)
 
 # Spacetime Studio
 

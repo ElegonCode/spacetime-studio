@@ -6,6 +6,8 @@ const statusStorageKey = "spacetime-studio.last-update-check-status";
 const cooldownMs = 60_000;
 const savedCheck = Number(localStorage.getItem(storageKey));
 
+// Tauri's Update class uses JavaScript private fields; a deep Vue ref proxy
+// breaks its methods, so keep the instance unproxied.
 export const availableUpdate = shallowRef<Update | null>(null);
 export const checkingForUpdate = ref(false);
 export const updateCheckFailed = ref(localStorage.getItem(statusStorageKey) === "failed");

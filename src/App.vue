@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { NavigationMenuItem } from "@nuxt/ui";
 import { useRoute, useRouter } from "vue-router";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
 import {
   availableUpdate,
   checkForUpdate,
@@ -21,17 +22,33 @@ const startupReady = ref(false);
 const route = useRoute();
 const router = useRouter();
 const updateProgress = ref<number | null>(null);
-const updateError = ref(false);
+const updateError = ref<string | null>(null);
 const installingUpdate = ref(false);
 let releaseCheckTimer: ReturnType<typeof setInterval> | undefined;
 async function installUpdate() {
-  if (!availableUpdate.value || installingUpdate.value) return;
+  const initialUpdate = availableUpdate.value;
+  if (!initialUpdate || installingUpdate.value) return;
+  const isRetry = Boolean(updateError.value);
   installingUpdate.value = true;
-  updateError.value = false;
+  updateError.value = null;
+  updateProgress.value = null;
+  let updateToInstall = initialUpdate;
   let downloaded = 0;
   let contentLength = 0;
   try {
-    await availableUpdate.value.downloadAndInstall((event) => {
+    if (isRetry) {
+      // A failed attempt may have used a manifest or asset URL that was still
+      // propagating. Retry against the current release metadata instead.
+      await updateToInstall.close();
+      const refreshedUpdate = await check();
+      if (!refreshedUpdate) {
+        throw new Error("No update is currently available. Restart the app to check its installed version.");
+      }
+      updateToInstall = refreshedUpdate;
+      availableUpdate.value = refreshedUpdate;
+    }
+
+    await updateToInstall.downloadAndInstall((event) => {
       if (event.event === "Started") {
         contentLength = event.data.contentLength ?? 0;
         updateProgress.value = 0;
@@ -45,8 +62,9 @@ async function installUpdate() {
       }
     });
     await relaunch();
-  } catch {
-    updateError.value = true;
+  } catch (error) {
+    console.error("Failed to install application update", error);
+    updateError.value = error instanceof Error ? error.message : String(error);
     installingUpdate.value = false;
     updateProgress.value = null;
   }
@@ -228,7 +246,7 @@ function isPageLoading(item: NavigationMenuItem) {
                 variant="subtle"
                 icon="i-lucide-download"
                 :title="updateError ? 'Update failed' : `Update ${availableUpdate.version} available`"
-                :description="updateError ? 'The update could not be installed. Try again later.' : updateProgress !== null ? `Downloading update: ${updateProgress}%` : 'A new version is ready to install.'"
+                :description="updateError ? `The update could not be installed: ${updateError}` : updateProgress !== null ? `Downloading update: ${updateProgress}%` : 'A new version is ready to install.'"
                 :ui="{ root: 'items-start' }"
               >
                 <template #actions>
