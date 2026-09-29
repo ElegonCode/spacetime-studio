@@ -12,6 +12,7 @@ export default defineConfig(async () => ({
     }),
     vue(),
     ui({
+      colorMode: false,
       ui: {
         colors: {
           primary: "rose",

@@ -17,12 +17,12 @@ export const resolvedTheme = computed(() =>
 
 watch(themePreference, (preference) => {
   localStorage.setItem(storageKey, preference);
-}, { immediate: true });
+}, { immediate: true, flush: "sync" });
 
 watch(resolvedTheme, (theme) => {
   document.documentElement.classList.toggle("dark", theme === "dark");
   document.documentElement.style.colorScheme = theme;
-}, { immediate: true });
+}, { immediate: true, flush: "sync" });
 
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (event) => {
   systemPrefersDark.value = event.matches;

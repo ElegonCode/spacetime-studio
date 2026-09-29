@@ -13,9 +13,11 @@ import {
   runPageRefresh,
 } from "./lib/pageActions";
 import { useConnections } from "./lib/connectionStore";
+import { pageNavigationLoadingPath } from "./router";
 import ConnectionPicker from "./components/ConnectionPicker.vue";
 
 const open = ref(true);
+const startupReady = ref(false);
 const route = useRoute();
 const router = useRouter();
 const updateProgress = ref<number | null>(null);
@@ -61,7 +63,7 @@ const { selectedId, selectedConnection, canAccess, loadConnections } = useConnec
 // shows data for the newly active connection.
 watch(selectedId, (newId, oldId) => {
   if (newId && oldId && newId !== oldId) {
-    runPageRefresh();
+    runPageRefresh("connection-change");
   }
 });
 
@@ -73,7 +75,9 @@ watch(canAccess, (allowed) => {
   }
 });
 
-onMounted(() => {
+onMounted(async () => {
+  await router.isReady().catch(() => {});
+  startupReady.value = true;
   loadConnections();
   void checkForUpdate();
   releaseCheckTimer = setInterval(() => void checkForUpdate(), 6 * 60 * 60 * 1000);
@@ -123,21 +127,25 @@ const baseItems: NavigationMenuItem[] = [
     label: "Tables",
     icon: "i-lucide-table",
     to: "/tables",
+    slot: "page",
   },
   {
     label: "SQL",
     icon: "i-lucide-square-terminal",
     to: "/sql",
+    slot: "page",
   },
   {
     label: "Functions",
     icon: "i-lucide-square-function",
     to: "/functions",
+    slot: "page",
   },
   {
     label: "Logs",
     icon: "i-lucide-clipboard-clock",
     to: "/logs",
+    slot: "page",
   },
 ];
 
@@ -149,11 +157,23 @@ const items = computed<NavigationMenuItem[]>(() =>
     disabled: item.to !== "/tables" && !canAccess.value,
   })),
 );
+
+function isPageLoading(item: NavigationMenuItem) {
+  return pageNavigationLoadingPath.value === item.to;
+}
 </script>
 
 <template>
   <UApp :toaster="{ position: 'bottom-right', progress: true, duration: 4000 }">
-    <div class="flex h-screen min-h-0 bg-default">
+    <div v-if="!startupReady" class="launch-screen" role="status" aria-live="polite">
+      <div class="launch-mark" aria-hidden="true">
+        <span class="launch-spinner" />
+        <span class="launch-core" />
+      </div>
+      <p class="launch-title">Spacetime Studio</p>
+      <p class="launch-caption">Loading your workspace</p>
+    </div>
+    <div v-else class="flex h-screen min-h-0 bg-default">
       <USidebar
         v-model:open="open"
         title="Spacetime Studio"
@@ -168,7 +188,16 @@ const items = computed<NavigationMenuItem[]>(() =>
             :items="items"
             orientation="vertical"
             :ui="{ link: 'p-1.5 overflow-hidden' }"
-          />
+          >
+            <template #page-trailing="{ item }">
+              <UIcon
+                v-if="isPageLoading(item)"
+                name="i-lucide-loader-circle"
+                class="size-4 animate-spin text-muted"
+                aria-hidden="true"
+              />
+            </template>
+          </UNavigationMenu>
         </template>
 
         <template #footer="{ state }">
@@ -183,6 +212,14 @@ const items = computed<NavigationMenuItem[]>(() =>
               @click="router.push('/settings')"
             >
               <span v-if="state !== 'collapsed'">Settings</span>
+              <template #trailing>
+                <UIcon
+                  v-if="pageNavigationLoadingPath === '/settings'"
+                  name="i-lucide-loader-circle"
+                  class="size-4 animate-spin"
+                  aria-hidden="true"
+                />
+              </template>
             </UButton>
             <div v-if="availableUpdate">
               <UAlert
@@ -262,7 +299,7 @@ const items = computed<NavigationMenuItem[]>(() =>
             :loading="pageRefreshLoading"
             :disabled="!pageRefreshHandler"
             aria-label="Refresh page"
-            @click="runPageRefresh"
+            @click="() => runPageRefresh()"
           />
         </div>
 

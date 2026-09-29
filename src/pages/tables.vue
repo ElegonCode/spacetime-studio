@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { DropdownMenuItem, TableColumn, TabsItem } from "@nuxt/ui";
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useToast } from "@nuxt/ui/composables";
 import {
   createRow,
@@ -26,12 +26,89 @@ import { dataTableUi, selectedCellUi } from "../lib/tableUi";
 import { useConnections } from "../lib/connectionStore";
 import ConnectionEmptyState from "../components/ConnectionEmptyState.vue";
 
-const { canAccess, loadConnections, selectedConnection } = useConnections();
+const { canAccess, loadConnections, selectedConnection, selectedId } = useConnections();
 const toast = useToast();
 
-const connectionId = ref<string | null>(getSelectedConnectionId());
+const TABLE_TABS_KEY = "spacetime-studio:table-tabs";
+const TABLE_SIDEBAR_WIDTH_KEY = "spacetime-studio:table-sidebar-width";
+const TABLE_SIDEBAR_MIN_WIDTH = 160;
+const TABLE_SIDEBAR_MAX_WIDTH = 480;
+
+function loadTableSidebarWidth() {
+  try {
+    const width = Number(localStorage.getItem(TABLE_SIDEBAR_WIDTH_KEY));
+    return Number.isFinite(width) && width > 0
+      ? Math.max(TABLE_SIDEBAR_MIN_WIDTH, Math.min(TABLE_SIDEBAR_MAX_WIDTH, width))
+      : 220;
+  } catch {
+    return 220;
+  }
+}
+
+type SavedTableTabState = { exists: boolean; tabs: string[]; active: string; pinned: string[] };
+
+function loadTableTabState(connectionId: string | null): SavedTableTabState {
+  try {
+    const raw = localStorage.getItem(TABLE_TABS_KEY);
+    const stored = JSON.parse(raw ?? "null");
+    if (stored && typeof stored === "object" && stored.byConnection && typeof stored.byConnection === "object") {
+      const state = connectionId ? stored.byConnection[connectionId] : null;
+      return state && typeof state === "object" ? normalizeTableTabState(state) : { exists: false, tabs: [], active: "", pinned: [] };
+    }
+    if (!stored || typeof stored !== "object" || !Array.isArray(stored.tabs)) return { exists: false, tabs: [], active: "", pinned: [] };
+    const state = normalizeTableTabState(stored);
+    // Migrate the previous single-connection format to the selected connection.
+    if (connectionId) localStorage.setItem(TABLE_TABS_KEY, JSON.stringify({ byConnection: { [connectionId]: state } }));
+    return state;
+  } catch {
+    return { exists: false, tabs: [], active: "", pinned: [] };
+  }
+}
+
+function normalizeTableTabState(stored: { tabs?: unknown; active?: unknown; pinned?: unknown }): SavedTableTabState {
+  return {
+    exists: true,
+    tabs: Array.isArray(stored.tabs) ? Array.from(new Set<string>(stored.tabs.filter((name: unknown): name is string => typeof name === "string"))) : [],
+    active: typeof stored.active === "string" ? stored.active : "",
+    pinned: Array.isArray(stored.pinned) ? stored.pinned.filter((name: unknown): name is string => typeof name === "string") : [],
+  };
+}
+
+function saveTableTabState(connectionId: string | null, state: Omit<SavedTableTabState, "exists">) {
+  if (!connectionId) return;
+  try {
+    const stored = JSON.parse(localStorage.getItem(TABLE_TABS_KEY) ?? "null");
+    const byConnection = stored && typeof stored === "object" && stored.byConnection && typeof stored.byConnection === "object"
+      ? stored.byConnection
+      : {};
+    localStorage.setItem(TABLE_TABS_KEY, JSON.stringify({ byConnection: { ...byConnection, [connectionId]: state } }));
+  } catch {
+    // Tab restoration is a convenience; the current session remains usable.
+  }
+}
+
+const savedTableTabState = loadTableTabState(selectedId.value);
+const hasSavedTableTabState = ref(savedTableTabState.exists);
+const connectionId = ref<string | null>(selectedId.value ?? getSelectedConnectionId());
 const schema = ref<SchemaSummary | null>(null);
-const selectedTableName = ref("");
+const selectedTableName = ref(savedTableTabState.active);
+const openTableTabs = ref<string[]>(savedTableTabState.tabs);
+const pinnedTableTabs = ref<string[]>(savedTableTabState.pinned);
+const contextTableTab = ref("");
+const tableTabsBar = ref<HTMLElement | null>(null);
+const tableSidebarWidth = ref(loadTableSidebarWidth());
+const isTableSidebarResizing = ref(false);
+const tableGridTemplateColumns = computed(() => `${tableSidebarWidth.value}px 1px minmax(0, 1fr)`);
+let tableSidebarResize: { pointerId: number; startX: number; startWidth: number } | null = null;
+const draggedTableTab = ref<{ name: string; pointerId: number; startX: number; startY: number; grabX: number; grabY: number; dragging: boolean } | null>(null);
+const tableDragPreview = ref<HTMLElement | null>(null);
+let tableTabReorderFrame = 0;
+let latestTableTabPointerEvent: PointerEvent | null = null;
+let suppressTableTabClick = false;
+let suppressTableTabClickTimer: ReturnType<typeof setTimeout> | undefined;
+const hasMoreTableTabsRight = ref(false);
+const hasMoreTableTabsLeft = ref(false);
+let tableTabsResizeObserver: ResizeObserver | undefined;
 const tablePage = ref<TablePage | null>(null);
 const page = ref(0);
 const pageSize = ref(25);
@@ -60,6 +137,67 @@ const pendingEditCount = computed(() =>
 
 const readOnly = computed(() => selectedConnection.value?.readOnly ?? false);
 
+function startTableSidebarResize(event: PointerEvent) {
+  if (event.button !== 0) return;
+  updateTableSidebarGlow(event);
+  tableSidebarResize = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startWidth: tableSidebarWidth.value,
+  };
+  isTableSidebarResizing.value = true;
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  event.preventDefault();
+}
+
+function updateTableSidebarGlow(event: PointerEvent) {
+  const resizer = event.currentTarget as HTMLElement;
+  const rect = resizer.getBoundingClientRect();
+  const y = Math.max(0, Math.min(rect.height, event.clientY - rect.top));
+  resizer.style.setProperty("--resize-y", `${y}px`);
+}
+
+function moveTableSidebarResize(event: PointerEvent) {
+  updateTableSidebarGlow(event);
+  const drag = tableSidebarResize;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  tableSidebarWidth.value = Math.max(
+    TABLE_SIDEBAR_MIN_WIDTH,
+    Math.min(TABLE_SIDEBAR_MAX_WIDTH, drag.startWidth + event.clientX - drag.startX),
+  );
+}
+
+function endTableSidebarResize(event: PointerEvent) {
+  if (tableSidebarResize?.pointerId !== event.pointerId) return;
+  tableSidebarResize = null;
+  isTableSidebarResizing.value = false;
+  try {
+    localStorage.setItem(TABLE_SIDEBAR_WIDTH_KEY, String(tableSidebarWidth.value));
+  } catch {
+    // Remembering the width is a convenience; resizing still works for this session.
+  }
+}
+
+function adjustTableSidebarWidth(event: KeyboardEvent) {
+  const width = event.key === "Home"
+    ? TABLE_SIDEBAR_MIN_WIDTH
+    : event.key === "End"
+      ? TABLE_SIDEBAR_MAX_WIDTH
+      : event.key === "ArrowLeft"
+        ? tableSidebarWidth.value - 16
+        : event.key === "ArrowRight"
+          ? tableSidebarWidth.value + 16
+          : null;
+  if (width === null) return;
+  event.preventDefault();
+  tableSidebarWidth.value = Math.max(TABLE_SIDEBAR_MIN_WIDTH, Math.min(TABLE_SIDEBAR_MAX_WIDTH, width));
+  try {
+    localStorage.setItem(TABLE_SIDEBAR_WIDTH_KEY, String(tableSidebarWidth.value));
+  } catch {
+    // Remembering the width is a convenience; resizing still works for this session.
+  }
+}
+
 const tables = computed(() => schema.value?.tables ?? []);
 const filteredTables = computed(() => {
   const search = tableSearch.value.trim().toLowerCase();
@@ -80,6 +218,245 @@ function toTabItem(table: TableSummary): TabsItem {
     icon: table.scheduledReducer ? "i-lucide-timer" : "i-lucide-table",
     disabled: pendingEditCount.value > 0 && table.name !== selectedTableName.value,
   };
+}
+
+function closeTableTab(name: string) {
+  if (pendingEditCount.value || pinnedTableTabs.value.includes(name)) return;
+  const index = openTableTabs.value.indexOf(name);
+  openTableTabs.value = openTableTabs.value.filter((tab) => tab !== name);
+  if (selectedTableName.value === name) {
+    selectedTableName.value = openTableTabs.value[Math.max(0, index - 1)] ?? "";
+  }
+}
+
+function togglePinnedTableTab(name: string) {
+  pinnedTableTabs.value = pinnedTableTabs.value.includes(name)
+    ? pinnedTableTabs.value.filter((tab) => tab !== name)
+    : [...pinnedTableTabs.value, name];
+  sortTableTabsByPinOrder();
+}
+
+function sortTableTabsByPinOrder() {
+  const pinned = pinnedTableTabs.value.filter((name) => openTableTabs.value.includes(name));
+  const unpinned = openTableTabs.value.filter((name) => !pinned.includes(name));
+  openTableTabs.value = [...pinned, ...unpinned];
+}
+
+function scrollTableTabsHorizontally(event: WheelEvent) {
+  const list = tableTabsBar.value?.querySelector<HTMLElement>('[data-slot="list"]');
+  if (!list || list.scrollWidth <= list.clientWidth) return;
+  const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+  if (!delta) return;
+  event.preventDefault();
+  list.scrollLeft += delta;
+}
+
+function startTableTabPointerDrag(event: PointerEvent) {
+  if (!(event.target instanceof Element)) return;
+  if (event.button === 2) {
+    if (event.target.closest('[role="tab"]')) event.stopPropagation();
+    return;
+  }
+  if (event.button !== 0 || event.target.closest('[role="button"]')) return;
+  const trigger = event.target.closest<HTMLElement>('[role="tab"]');
+  const list = tableTabsBar.value?.querySelector<HTMLElement>('[data-slot="list"]');
+  if (!trigger || !list) return;
+  const index = Array.from(list.querySelectorAll('[role="tab"]')).indexOf(trigger);
+  const name = openTableTabs.value[index];
+  if (!name) return;
+  const rect = trigger.getBoundingClientRect();
+  draggedTableTab.value = { name, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, grabX: event.clientX - rect.left, grabY: event.clientY - rect.top, dragging: false };
+}
+
+function moveTableTabPointerDrag(event: PointerEvent) {
+  const drag = draggedTableTab.value;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  if (!drag.dragging && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
+  drag.dragging = true;
+  positionTableDragPreview(drag, event.clientX, event.clientY);
+  event.preventDefault();
+  latestTableTabPointerEvent = event;
+  if (!tableTabReorderFrame) {
+    tableTabReorderFrame = requestAnimationFrame(() => {
+      tableTabReorderFrame = 0;
+      const latestEvent = latestTableTabPointerEvent;
+      const activeDrag = draggedTableTab.value;
+      latestTableTabPointerEvent = null;
+      if (!latestEvent || !activeDrag?.dragging) return;
+      const list = tableTabsBar.value?.querySelector<HTMLElement>('[data-slot="list"]');
+      if (!list) return;
+      const listRect = list.getBoundingClientRect();
+      if (latestEvent.clientX < listRect.left + 24) list.scrollLeft -= 12;
+      else if (latestEvent.clientX > listRect.right - 24) list.scrollLeft += 12;
+      reorderTableTabAtPointer(latestEvent, activeDrag);
+    });
+  }
+}
+
+function positionTableDragPreview(drag: NonNullable<typeof draggedTableTab.value>, x: number, y: number) {
+  const position = () => {
+    if (draggedTableTab.value !== drag || !tableDragPreview.value) return;
+    tableDragPreview.value.style.transform = `translate3d(${x - drag.grabX}px, ${y - drag.grabY}px, 0)`;
+  };
+  if (tableDragPreview.value) position();
+  else void nextTick(position);
+}
+
+function reorderTableTabAtPointer(event: PointerEvent, drag: NonNullable<typeof draggedTableTab.value>) {
+  const list = tableTabsBar.value?.querySelector<HTMLElement>('[data-slot="list"]');
+  if (!list) return;
+  const hit = document.elementFromPoint(event.clientX, event.clientY);
+  const trigger = hit instanceof Element ? hit.closest<HTMLElement>('[role="tab"]') : null;
+  if (!trigger) return;
+  const targetIndex = Array.from(list.querySelectorAll('[role="tab"]')).indexOf(trigger);
+  const target = openTableTabs.value[targetIndex];
+  const draggedName = drag.name;
+  if (!target || target === draggedName) return;
+  const isPinned = (name: string) => pinnedTableTabs.value.includes(name);
+  const pinned = openTableTabs.value.filter((name) => isPinned(name));
+  const unpinned = openTableTabs.value.filter((name) => !isPinned(name));
+  const sourceGroup = isPinned(draggedName) ? pinned : unpinned;
+  const sourceIndex = sourceGroup.indexOf(draggedName);
+  if (sourceIndex < 0) return;
+  sourceGroup.splice(sourceIndex, 1);
+
+  let insertAt: number;
+  if (isPinned(draggedName) === isPinned(target)) {
+    const targetPosition = sourceGroup.indexOf(target);
+    const targetRect = trigger.getBoundingClientRect();
+    insertAt = targetPosition + (event.clientX > targetRect.left + targetRect.width / 2 ? 1 : 0);
+  } else {
+    // Keep pinned and unpinned tabs in their own groups when dragging across
+    // the boundary between them.
+    insertAt = isPinned(draggedName) ? sourceGroup.length : 0;
+  }
+  sourceGroup.splice(Math.max(0, insertAt), 0, draggedName);
+  const reordered = [...pinned, ...unpinned];
+  if (reordered.some((name, index) => name !== openTableTabs.value[index])) {
+    const previousRects = new Map(Array.from(list.querySelectorAll<HTMLElement>('[role="tab"]')).map((tab, index) => [openTableTabs.value[index], tab.getBoundingClientRect()]));
+    pinnedTableTabs.value = reordered.filter(isPinned);
+    openTableTabs.value = reordered;
+    void nextTick(() => {
+      const updatedList = tableTabsBar.value?.querySelector<HTMLElement>('[data-slot="list"]');
+      updatedList?.querySelectorAll<HTMLElement>('[role="tab"]').forEach((tab, index) => {
+        const previous = previousRects.get(openTableTabs.value[index]);
+        if (!previous) return;
+        const current = tab.getBoundingClientRect();
+        const x = previous.left - current.left;
+        const y = previous.top - current.top;
+        if (Math.abs(x) + Math.abs(y) < 1) return;
+        tab.getAnimations().forEach((animation) => animation.cancel());
+        tab.animate([{ transform: `translate(${x}px, ${y}px)` }, { transform: "translate(0, 0)" }], { duration: 130, easing: "ease-out" });
+      });
+    });
+  }
+}
+
+function endTableTabPointerDrag(event: PointerEvent) {
+  const drag = draggedTableTab.value;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  if (drag.dragging) {
+    if (tableTabReorderFrame) cancelAnimationFrame(tableTabReorderFrame);
+    tableTabReorderFrame = 0;
+    latestTableTabPointerEvent = null;
+    positionTableDragPreview(drag, event.clientX, event.clientY);
+    reorderTableTabAtPointer(event, drag);
+    suppressTableTabClick = true;
+    if (suppressTableTabClickTimer) clearTimeout(suppressTableTabClickTimer);
+    suppressTableTabClickTimer = setTimeout(() => { suppressTableTabClick = false; }, 300);
+  }
+  draggedTableTab.value = null;
+}
+
+function suppressTableTabClickAfterDrag(event: MouseEvent) {
+  if (!suppressTableTabClick) return;
+  suppressTableTabClick = false;
+  if (suppressTableTabClickTimer) clearTimeout(suppressTableTabClickTimer);
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function activateTableTabClose(name: string) {
+  if (pinnedTableTabs.value.includes(name)) togglePinnedTableTab(name);
+  else closeTableTab(name);
+}
+
+function setContextTableTab(event: MouseEvent) {
+  contextTableTab.value = "";
+  if (!(event.target instanceof Element)) return;
+  const trigger = event.target.closest<HTMLElement>('[role="tab"]');
+  const list = tableTabsBar.value?.querySelector<HTMLElement>('[data-slot="list"]');
+  if (!trigger || !list) return;
+  const index = Array.from(list.querySelectorAll('[role="tab"]')).indexOf(trigger);
+  contextTableTab.value = openTableTabs.value[index] ?? "";
+}
+
+const tableContextMenuItems = computed(() => {
+  const name = contextTableTab.value;
+  const pinned = pinnedTableTabs.value.includes(name);
+  return [
+    { label: pinned ? "Unpin tab" : "Pin tab", icon: pinned ? "i-lucide-pin-off" : "i-lucide-pin", onSelect: () => togglePinnedTableTab(name) },
+  ];
+});
+
+async function measureTableTabOverflow() {
+  await nextTick();
+  const list = tableTabsBar.value?.querySelector<HTMLElement>('[data-slot="list"]');
+  hasMoreTableTabsLeft.value = Boolean(list && list.scrollLeft > 1);
+  hasMoreTableTabsRight.value = Boolean(list && list.scrollLeft + list.clientWidth < list.scrollWidth - 1);
+}
+
+function closeTableTabFromMiddleClick(event: MouseEvent) {
+  if (event.button !== 1 || !(event.target instanceof Element)) return;
+  const trigger = event.target.closest<HTMLElement>('[role="tab"]');
+  const list = tableTabsBar.value?.querySelector<HTMLElement>('[data-slot="list"]');
+  if (!trigger || !list) return;
+  const index = Array.from(list.querySelectorAll('[role="tab"]')).indexOf(trigger);
+  const name = openTableTabs.value[index];
+  if (!name || pendingEditCount.value || pinnedTableTabs.value.includes(name)) return;
+  event.preventDefault();
+  closeTableTab(name);
+}
+
+watch([openTableTabs, () => Boolean(draggedTableTab.value?.dragging)], async ([, dragging]) => {
+  if (dragging) return;
+  await nextTick();
+  void measureTableTabOverflow();
+}, { deep: true });
+watch([openTableTabs, selectedTableName, () => Boolean(draggedTableTab.value?.dragging)], ([tabs, active, dragging]) => {
+  if (dragging) return;
+  hasSavedTableTabState.value = true;
+  try {
+    saveTableTabState(connectionId.value, { tabs, active, pinned: pinnedTableTabs.value });
+  } catch {
+    // Tab restoration is a convenience; the current session remains usable.
+  }
+}, { deep: true });
+watch([pinnedTableTabs, () => Boolean(draggedTableTab.value?.dragging)], ([pinned, dragging]) => {
+  if (dragging) return;
+  try {
+    saveTableTabState(connectionId.value, { tabs: openTableTabs.value, active: selectedTableName.value, pinned });
+  } catch {
+    // Tab restoration is a convenience; the current session remains usable.
+  }
+}, { deep: true });
+
+async function scrollActiveTableTabIntoView() {
+  await nextTick();
+  const list = tableTabsBar.value?.querySelector<HTMLElement>('[data-slot="list"]');
+  const active = list?.querySelector<HTMLElement>('[data-state="active"]');
+  if (!list || !active) return;
+  if (active === list.lastElementChild || active.parentElement === list.lastElementChild) {
+    list.scrollTo({ left: list.scrollWidth, behavior: "smooth" });
+    return;
+  }
+  const listRect = list.getBoundingClientRect();
+  const activeRect = active.getBoundingClientRect();
+  if (activeRect.left < listRect.left) {
+    list.scrollBy({ left: activeRect.left - listRect.left, behavior: "smooth" });
+  } else if (activeRect.right > listRect.right) {
+    list.scrollBy({ left: activeRect.right - listRect.right, behavior: "smooth" });
+  }
 }
 
 // Schedule tables lead each section; otherwise the schema's order is kept.
@@ -360,7 +737,6 @@ async function persist(action: () => Promise<void>, success: string) {
 function clearSchema() {
   schema.value = null;
   tablePage.value = null;
-  selectedTableName.value = "";
   error.value = "";
 }
 
@@ -378,15 +754,19 @@ async function loadSchema() {
   try {
     const loaded = await getSchema(connectionId.value);
     schema.value = loaded;
-    // Keep the open table across refreshes, but fall back to the first one
-    // when it does not exist in this (possibly different) database.
-    const keep = loaded.tables.some(
-      (table) => table.name === selectedTableName.value,
-    );
+    // Restore saved tabs in order, dropping tables that no longer exist in
+    // the connected database.
+    const tableNames = new Set(loaded.tables.map((table) => table.name));
+    openTableTabs.value = openTableTabs.value.filter((name) => tableNames.has(name));
+    pinnedTableTabs.value = pinnedTableTabs.value.filter((name) => tableNames.has(name));
+    sortTableTabsByPinOrder();
     const previous = selectedTableName.value;
-    selectedTableName.value = keep
+    selectedTableName.value = tableNames.has(previous)
       ? previous
-      : (loaded.tables[0]?.name ?? "");
+      : (openTableTabs.value[0] ?? (hasSavedTableTabState.value ? "" : loaded.tables[0]?.name ?? ""));
+    if (selectedTableName.value && !openTableTabs.value.includes(selectedTableName.value))
+      openTableTabs.value.push(selectedTableName.value);
+    void scrollActiveTableTabIntoView();
     // The watcher on selectedTableName loads rows when the name changes.
     if (selectedTableName.value && selectedTableName.value === previous)
       await loadRows();
@@ -454,6 +834,8 @@ function submitWhere() {
 }
 
 watch(selectedTableName, () => {
+  if (selectedTableName.value && !openTableTabs.value.includes(selectedTableName.value))
+    openTableTabs.value.push(selectedTableName.value);
   page.value = 0;
   whereSql.value = "";
   activeWhereSql.value = "";
@@ -461,7 +843,28 @@ watch(selectedTableName, () => {
   originalRow.value = null;
   rowEditorOpen.value = false;
   loadRows();
+  void scrollActiveTableTabIntoView();
 });
+
+watch(selectedId, (nextConnectionId, previousConnectionId) => {
+  if (previousConnectionId) {
+    saveTableTabState(previousConnectionId, {
+      tabs: openTableTabs.value,
+      active: selectedTableName.value,
+      pinned: pinnedTableTabs.value,
+    });
+  }
+  const state = loadTableTabState(nextConnectionId);
+  connectionId.value = nextConnectionId;
+  hasSavedTableTabState.value = state.exists;
+  openTableTabs.value = state.tabs;
+  pinnedTableTabs.value = state.pinned;
+  selectedTableName.value = state.active;
+  schema.value = null;
+  tablePage.value = null;
+  drafts.value = {};
+  page.value = 0;
+}, { flush: "sync" });
 
 watch(pageSize, () => {
   page.value = 0;
@@ -478,14 +881,28 @@ async function refresh() {
   }
 }
 
-watch(canAccess, () => loadSchema());
+watch([canAccess, selectedId], () => loadSchema());
 
 onMounted(() => {
+  window.addEventListener("pointermove", moveTableTabPointerDrag);
+  window.addEventListener("pointerup", endTableTabPointerDrag);
+  window.addEventListener("pointercancel", endTableTabPointerDrag);
+  if (tableTabsBar.value) {
+    tableTabsResizeObserver = new ResizeObserver(measureTableTabOverflow);
+    tableTabsResizeObserver.observe(tableTabsBar.value);
+  }
+  void measureTableTabOverflow();
   loadSchema();
   setPageRefreshHandler(refresh);
 });
 
 onUnmounted(() => {
+  if (tableTabReorderFrame) cancelAnimationFrame(tableTabReorderFrame);
+  window.removeEventListener("pointermove", moveTableTabPointerDrag);
+  window.removeEventListener("pointerup", endTableTabPointerDrag);
+  window.removeEventListener("pointercancel", endTableTabPointerDrag);
+  if (suppressTableTabClickTimer) clearTimeout(suppressTableTabClickTimer);
+  tableTabsResizeObserver?.disconnect();
   clearPageRefreshHandler(refresh);
 });
 </script>
@@ -501,7 +918,7 @@ onUnmounted(() => {
       close
       @update:open="error = ''"
     />
-    <div class="grid min-h-0 min-w-0 flex-1 lg:grid-cols-[220px_minmax(0,1fr)]">
+    <div class="grid min-h-0 min-w-0 flex-1" :style="{ gridTemplateColumns: tableGridTemplateColumns }">
       <aside class="flex min-h-0 min-w-0 flex-col bg-default/30">
         <div class="shrink-0 p-2">
           <UInput
@@ -552,32 +969,88 @@ onUnmounted(() => {
               :items="section.items"
               class="mb-3 w-full"
               :ui="{
-                list: 'items-start bg-opacity-0 w-full',
-                trigger: 'w-full',
-                // Each section is its own tab list, so hide the pill in the
-                // ones that do not hold the selected table.
-                indicator: section.items.some(
-                  (item) => item.value === selectedTableName,
-                )
-                  ? undefined
-                  : 'hidden',
+                list: 'items-start w-full bg-transparent',
+                indicator: 'hidden',
+                trigger: 'min-h-9 w-full rounded-md border border-transparent px-2.5 py-1.5 text-sm font-medium text-muted transition-colors hover:bg-elevated/70 hover:text-highlighted data-[state=active]:border-accented data-[state=active]:bg-accented data-[state=active]:font-semibold data-[state=active]:text-highlighted data-[state=active]:shadow-sm',
               }"
             />
           </template>
         </div>
       </aside>
 
+      <div
+        role="separator"
+        aria-label="Resize table list"
+        aria-orientation="vertical"
+        aria-valuemin="160"
+        aria-valuemax="480"
+        :aria-valuenow="tableSidebarWidth"
+        :data-resizing="isTableSidebarResizing"
+        tabindex="0"
+        class="pane-resizer pane-resizer--vertical relative z-10 w-px cursor-col-resize touch-none bg-transparent outline-none"
+        @pointerdown="startTableSidebarResize"
+        @pointermove="moveTableSidebarResize"
+        @pointerup="endTableSidebarResize"
+        @pointercancel="endTableSidebarResize"
+        @keydown="adjustTableSidebarWidth"
+      >
+        <span class="pane-resizer-line pointer-events-none absolute inset-y-0 left-0 w-px" />
+        <span class="pane-resizer-glow pointer-events-none absolute inset-y-0" />
+      </div>
+
       <section
         v-if="!canAccess"
-        class="min-h-0 min-w-0 border-l border-default bg-default/30"
+        class="min-h-0 min-w-0 bg-default/30"
       >
         <ConnectionEmptyState />
       </section>
 
       <section
         v-else
-        class="min-h-0 min-w-0 flex flex-col border-l border-default bg-default/30"
+        class="min-h-0 min-w-0 flex flex-col bg-default/30"
       >
+        <div v-if="openTableTabs.length" ref="tableTabsBar" class="relative flex min-h-12 shrink-0 items-center justify-between gap-2 overflow-hidden border-b border-default bg-elevated/40 px-1" @scroll.capture="measureTableTabOverflow">
+          <UContextMenu :items="tableContextMenuItems" :disabled="!contextTableTab">
+          <div class="min-w-0 flex-1 overflow-hidden" @contextmenu.capture="setContextTableTab" @pointerdown.capture="startTableTabPointerDrag" @click.capture="suppressTableTabClickAfterDrag" @wheel="scrollTableTabsHorizontally">
+          <UTabs
+            v-if="openTableTabs.length"
+            v-model="selectedTableName"
+            :items="openTableTabs.map((name) => ({ label: name, value: name, icon: 'i-lucide-table', pinned: pinnedTableTabs.includes(name), ui: { trigger: draggedTableTab?.name === name && draggedTableTab.dragging ? 'pointer-events-none opacity-35' : '' } }))"
+            :content="false"
+            size="lg"
+            variant="pill"
+            class="min-w-0 overflow-hidden"
+            @mousedown.middle.stop.prevent="closeTableTabFromMiddleClick"
+            :ui="{
+              root: 'min-w-0 overflow-hidden',
+              list: 'tab-scroll-list min-w-0 flex-nowrap gap-1 overflow-x-auto overflow-y-hidden bg-transparent py-1',
+              indicator: 'hidden',
+              trigger: 'min-h-10 flex-none w-fit cursor-grab rounded-lg border border-transparent px-3 py-2 text-sm font-medium focus-visible:outline-none active:cursor-grabbing data-[state=active]:border-accented data-[state=active]:bg-accented data-[state=active]:font-semibold data-[state=active]:text-highlighted data-[state=active]:shadow-sm',
+              label: 'max-w-56 truncate',
+            }"
+          >
+            <template #trailing="{ item }">
+              <span
+                role="button"
+                tabindex="0"
+                class="ml-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-elevated hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary"
+                :class="pendingEditCount && !item.pinned ? 'pointer-events-none opacity-40' : ''"
+                :aria-label="item.pinned ? 'Unpin ' + item.label + ' tab' : 'Close ' + item.label + ' tab'"
+                :title="item.pinned ? 'Click to unpin tab' : pendingEditCount ? 'Save or discard pending edits before closing a tab' : 'Close ' + item.label"
+                @click.stop.prevent="activateTableTabClose(String(item.value))"
+                @keydown.enter.stop.prevent="activateTableTabClose(String(item.value))"
+                @keydown.space.stop.prevent="activateTableTabClose(String(item.value))"
+              >
+                <UIcon :name="item.pinned ? 'i-lucide-pin' : 'i-lucide-x'" class="size-4" />
+              </span>
+            </template>
+          </UTabs>
+          </div>
+          </UContextMenu>
+          <div v-if="hasMoreTableTabsLeft" class="pointer-events-none absolute inset-y-0 left-0 z-10 w-12 bg-gradient-to-r from-elevated via-elevated/95 to-transparent" />
+          <div v-if="hasMoreTableTabsRight" class="pointer-events-none absolute inset-y-0 right-0 z-10 w-12 bg-gradient-to-l from-elevated via-elevated/95 to-transparent" />
+        </div>
+        <template v-if="selectedTableName">
         <div
           class="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b border-default p-2"
         >
@@ -821,7 +1294,19 @@ onUnmounted(() => {
             </UTooltip>
           </div>
         </div>
+        </template>
       </section>
+    </div>
+
+    <div
+      v-if="draggedTableTab?.dragging"
+      ref="tableDragPreview"
+      class="pointer-events-none fixed z-50 flex items-center gap-2 rounded-lg border border-primary/40 bg-elevated px-3 py-2 text-sm font-medium text-highlighted shadow-lg opacity-95"
+      style="left: 0; top: 0; will-change: transform"
+      aria-hidden="true"
+    >
+      <UIcon name="i-lucide-table" class="size-4 text-muted" />
+      <span class="max-w-56 truncate">{{ draggedTableTab.name }}</span>
     </div>
 
     <USlideover
@@ -916,3 +1401,14 @@ onUnmounted(() => {
     </UModal>
   </div>
 </template>
+
+<style>
+.tab-scroll-list {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.tab-scroll-list::-webkit-scrollbar {
+  display: none;
+}
+</style>

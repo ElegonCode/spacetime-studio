@@ -85,6 +85,24 @@ function askDelete(connection: ConnectionProfile) {
   pendingDelete.value = connection;
 }
 
+function removeSavedTabsForConnection(connectionId: string) {
+  for (const key of ["spacetime-studio:table-tabs", "spacetime-studio:query-tabs"]) {
+    try {
+      const stored = JSON.parse(localStorage.getItem(key) ?? "null");
+      if (stored?.byConnection && typeof stored.byConnection === "object") {
+        const byConnection = { ...stored.byConnection };
+        delete byConnection[connectionId];
+        localStorage.setItem(key, JSON.stringify({ ...stored, byConnection }));
+      } else if (selectedId.value === connectionId) {
+        // Older versions stored one global tab set before tabs were scoped by connection.
+        localStorage.removeItem(key);
+      }
+    } catch {
+      // A malformed saved tab entry should not prevent connection deletion.
+    }
+  }
+}
+
 async function confirmDelete() {
   const connection = pendingDelete.value;
   if (!connection || deleting.value) return;
@@ -94,6 +112,7 @@ async function confirmDelete() {
     await deleteConnection(connection.id);
     pendingDelete.value = null;
     await loadConnections();
+    removeSavedTabsForConnection(connection.id);
     toast.add({ title: `Removed ${connection.name}`, icon: "i-lucide-trash-2" });
   } catch (err) {
     toast.add({ title: "Could not remove connection", description: String(err), color: "error" });

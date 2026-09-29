@@ -8,6 +8,7 @@ import { resolvedTheme } from "../lib/theme";
 import "../../node_modules/monaco-editor/min/vs/editor/editor.main.css";
 
 const props = defineProps<{
+  modelId: number | string;
   modelValue: string;
   tables: TableSummary[];
 }>();
@@ -25,6 +26,21 @@ const host = ref<HTMLDivElement | null>(null);
 let editor: monaco.editor.IStandaloneCodeEditor | undefined;
 let completionProvider: monaco.IDisposable | undefined;
 let resizeObserver: ResizeObserver | undefined;
+const models = new Map<string, monaco.editor.ITextModel>();
+
+function getSqlModel(id: number | string, value: string) {
+  const key = String(id);
+  let model = models.get(key);
+  if (!model || model.isDisposed()) {
+    model = monaco.editor.createModel(
+      value,
+      "sql",
+      monaco.Uri.parse(`inmemory://spacetime-studio/query-${encodeURIComponent(key)}.sql`),
+    );
+    models.set(key, model);
+  }
+  return model;
+}
 
 const sqlKeywords = [
   "SELECT", "FROM", "WHERE", "AND", "OR", "AS", "LIMIT", "JOIN", "INNER", "ON",
@@ -156,6 +172,10 @@ function registerCompletions() {
         }
       } else if (lastClause === "LIMIT" || lastClause === "VALUES") {
         showValues = true;
+      } else if (!lastClause) {
+        // Keep useful keyword completions available while starting a query in
+        // a blank tab, including after the first character has been typed.
+        keywordItems = sqlKeywords;
       } else if (lastClause) {
         keywordItems = sqlKeywords.filter((keyword) =>
           ["SELECT", "INSERT", "UPDATE", "DELETE", "SHOW", "SET"].includes(keyword),
@@ -232,15 +252,17 @@ function registerCompletions() {
 }
 
 watch(() => props.tables, registerCompletions);
-watch(() => props.modelValue, (value) => {
-  if (editor && editor.getValue() !== value) editor.setValue(value);
+watch(() => [props.modelId, props.modelValue] as const, ([id, value]) => {
+  const model = getSqlModel(id, value);
+  if (!editor) return;
+  if (editor.getModel() !== model) editor.setModel(model);
+  if (model.getValue() !== value) model.setValue(value);
 });
 
 onMounted(() => {
   if (!host.value) return;
   editor = monaco.editor.create(host.value, {
-    value: props.modelValue,
-    language: "sql",
+    model: getSqlModel(props.modelId, props.modelValue),
     theme: resolvedTheme.value === "dark" ? "vs-dark" : "vs",
     automaticLayout: true,
     minimap: { enabled: false },
@@ -291,6 +313,8 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect();
   completionProvider?.dispose();
   editor?.dispose();
+  models.forEach((model) => model.dispose());
+  models.clear();
 });
 </script>
 

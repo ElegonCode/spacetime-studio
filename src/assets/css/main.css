@@ -19,3 +19,93 @@
   --ui-border-muted: #27272a;
   --ui-border-accented: #3f3f46;
 }
+
+* {
+  scrollbar-color: transparent transparent;
+  scrollbar-width: thin;
+}
+
+*:hover,
+*:focus-within {
+  scrollbar-color: var(--ui-border-accented) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-color: transparent;
+  background-clip: padding-box;
+}
+
+*:hover::-webkit-scrollbar-thumb,
+*:focus-within::-webkit-scrollbar-thumb {
+  background-color: var(--ui-border-accented);
+}
+
+.pane-resizer::before {
+  position: absolute;
+  z-index: 2;
+  content: "";
+}
+
+.pane-resizer--vertical::before {
+  inset: 0 -14px;
+  cursor: col-resize;
+}
+
+.pane-resizer--horizontal::before {
+  inset: -14px 0;
+  cursor: row-resize;
+}
+
+.pane-resizer-line {
+  background: var(--ui-border-accented);
+}
+
+.pane-resizer-glow {
+  z-index: 1;
+  opacity: 0;
+  filter: blur(1px);
+  transition: opacity 220ms ease;
+}
+
+.pane-resizer--vertical .pane-resizer-glow {
+  left: -1px;
+  width: 3px;
+  background: linear-gradient(
+    to bottom,
+    transparent calc(var(--resize-y, 50%) - 96px),
+    rgb(59 130 246 / 35%) calc(var(--resize-y, 50%) - 36px),
+    rgb(96 165 250 / 95%) var(--resize-y, 50%),
+    rgb(59 130 246 / 35%) calc(var(--resize-y, 50%) + 36px),
+    transparent calc(var(--resize-y, 50%) + 96px)
+  );
+}
+
+.pane-resizer--horizontal .pane-resizer-glow {
+  top: -1px;
+  height: 3px;
+  background: linear-gradient(
+    to right,
+    transparent calc(var(--resize-x, 50%) - 96px),
+    rgb(59 130 246 / 35%) calc(var(--resize-x, 50%) - 36px),
+    rgb(96 165 250 / 95%) var(--resize-x, 50%),
+    rgb(59 130 246 / 35%) calc(var(--resize-x, 50%) + 36px),
+    transparent calc(var(--resize-x, 50%) + 96px)
+  );
+}
+
+.pane-resizer:hover .pane-resizer-glow,
+.pane-resizer:focus-visible .pane-resizer-glow,
+.pane-resizer[data-resizing="true"] .pane-resizer-glow {
+  opacity: 1;
+}

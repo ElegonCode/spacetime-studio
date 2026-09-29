@@ -1,6 +1,7 @@
 import { ref, shallowRef } from "vue";
 
-type PageRefreshHandler = () => Promise<void> | void;
+export type PageRefreshReason = "manual" | "connection-change";
+type PageRefreshHandler = (reason?: PageRefreshReason) => Promise<void> | void;
 
 export const pageRefreshHandler = shallowRef<PageRefreshHandler | null>(null);
 export const pageRefreshLoading = ref(false);
@@ -15,7 +16,7 @@ export function clearPageRefreshHandler(handler: PageRefreshHandler) {
   }
 }
 
-export async function runPageRefresh() {
+export async function runPageRefresh(reason: PageRefreshReason = "manual") {
   const handler = pageRefreshHandler.value;
 
   if (!handler || pageRefreshLoading.value) return;
@@ -23,7 +24,7 @@ export async function runPageRefresh() {
   pageRefreshLoading.value = true;
 
   try {
-    await handler();
+    await handler(reason);
   } finally {
     pageRefreshLoading.value = false;
   }
