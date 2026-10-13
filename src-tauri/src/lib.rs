@@ -1,4 +1,5 @@
 mod spacetime;
+mod ecosystem;
 
 use tauri::Manager;
 
@@ -19,6 +20,7 @@ pub fn run() {
         .setup(|app| {
             let profiles = spacetime::load_profiles(app.handle());
             app.manage(spacetime::AppState::new(profiles));
+            app.manage(ecosystem::InstallationState::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -38,6 +40,10 @@ pub fn run() {
             spacetime::stop_log_stream,
             spacetime::export_rows,
             spacetime::export_table,
+            ecosystem::get_spacetime_news,
+            ecosystem::get_local_installations,
+            ecosystem::get_spacetime_releases,
+            ecosystem::manage_spacetime_version,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

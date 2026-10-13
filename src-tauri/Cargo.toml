@@ -25,7 +25,8 @@ keyring = { version = "3", features = ["apple-native", "crypto-rust", "sync-secr
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["sync", "macros"] }
+tokio = { version = "1", features = ["sync", "macros", "process", "time"] }
+semver = "1"
 log = "0.4"
 tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"

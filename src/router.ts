@@ -5,6 +5,7 @@ import { useConnections } from "./lib/connectionStore";
 
 export const pageNavigationLoadingPath = ref<string | null>(null);
 const DEFAULT_PAGE = "/tables";
+export const connectionIndependentPages = ["/tables", "/settings", "/news", "/installations"];
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -15,11 +16,11 @@ export const router = createRouter({
   ],
 });
 
-// Tables and settings work without a reachable database; database pages send
+// Application pages work without a reachable database; database pages send
 // the user back to tables until a connection is available.
 router.beforeEach((to) => {
   const { canAccess } = useConnections();
-  if (!canAccess.value && !["/tables", "/settings"].includes(to.path)) {
+  if (!canAccess.value && !connectionIndependentPages.includes(to.path)) {
     pageNavigationLoadingPath.value = router.currentRoute.value.path === "/tables"
       ? null
       : "/tables";

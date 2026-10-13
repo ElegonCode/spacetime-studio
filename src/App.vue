@@ -14,7 +14,7 @@ import {
   runPageRefresh,
 } from "./lib/pageActions";
 import { useConnections } from "./lib/connectionStore";
-import { pageNavigationLoadingPath } from "./router";
+import { connectionIndependentPages, pageNavigationLoadingPath } from "./router";
 import ConnectionPicker from "./components/ConnectionPicker.vue";
 
 const open = ref(true);
@@ -86,9 +86,9 @@ watch(selectedId, (newId, oldId) => {
 });
 
 // A connection that turns out to be unreachable locks database pages, while
-// settings remains available so the connection can be fixed.
+// application pages remain available.
 watch(canAccess, (allowed) => {
-  if (!allowed && !["/tables", "/settings"].includes(route.path)) {
+  if (!allowed && !connectionIndependentPages.includes(route.path)) {
     router.push("/tables");
   }
 });
@@ -130,6 +130,14 @@ const pageHeaders: Record<string, { title: string; description: string }> = {
     title: "Settings",
     description: "Manage application and connection settings.",
   },
+  "/news": {
+    title: "SpacetimeDB news",
+    description: "The latest articles and announcements from SpacetimeDB.",
+  },
+  "/installations": {
+    title: "Local installations",
+    description: "Manage installed SpacetimeDB versions on this computer.",
+  },
 };
 
 const pageHeader = computed(
@@ -165,6 +173,11 @@ const baseItems: NavigationMenuItem[] = [
     to: "/logs",
     slot: "page",
   },
+];
+
+const footerPages = [
+  { label: "SpacetimeDB news", icon: "i-lucide-newspaper", to: "/news" },
+  { label: "Local installations", icon: "i-lucide-hard-drive", to: "/installations" },
 ];
 
 // Every page but tables needs a reachable connection, so those links stay
@@ -220,6 +233,22 @@ function isPageLoading(item: NavigationMenuItem) {
 
         <template #footer="{ state }">
           <div class="flex w-full flex-col gap-1">
+            <UButton
+              v-for="item in footerPages"
+              :key="item.to"
+              :icon="item.icon"
+              :color="route.path === item.to ? 'primary' : 'neutral'"
+              :variant="route.path === item.to ? 'soft' : 'ghost'"
+              :class="state === 'collapsed' ? 'mx-auto' : 'w-full justify-start'"
+              :aria-label="item.label"
+              :title="item.label"
+              :to="item.to"
+            >
+              <span v-if="state !== 'collapsed'">{{ item.label }}</span>
+              <template #trailing>
+                <UIcon v-if="pageNavigationLoadingPath === item.to" name="i-lucide-loader-circle" class="size-4 animate-spin" aria-hidden="true" />
+              </template>
+            </UButton>
             <UButton
               :icon="'i-lucide-settings'"
               :color="route.path === '/settings' ? 'primary' : 'neutral'"

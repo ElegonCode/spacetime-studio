@@ -111,7 +111,7 @@ if (showcaseEnabled) {
     },
   ];
 
-  const playerSeeds = tables[0].rows;
+  const playerSeeds = tables[0]!.rows as Extract<(typeof tables)[number]["rows"][number], { player_id: number }>[];
   for (let index = 0; index < 59; index += 1) {
     const seed = playerSeeds[index % playerSeeds.length];
     playerSeeds.push({
