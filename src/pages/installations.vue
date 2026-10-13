@@ -49,6 +49,9 @@ async function confirmUninstall() {
   pendingUninstall.value = null;
   await runVersionOperation("uninstall", version);
 }
+function onUninstallModalOpenChange(open: boolean) {
+  if (!open) pendingUninstall.value = null;
+}
 const refresh = async (reason?: PageRefreshReason) => {
   if (reason === "connection-change" || versionOperation.value) return;
   await Promise.all([refreshInstallations(), refreshReleases()]);
@@ -168,7 +171,7 @@ onUnmounted(() => clearPageRefreshHandler(refresh));
       :open="pendingUninstall !== null"
       title="Uninstall SpacetimeDB version"
       :description="`Remove SpacetimeDB ${pendingUninstall ?? ''} from this computer? You can install it again later. Stop any local server using this version before uninstalling it.`"
-      @update:open="open => { if (!open) pendingUninstall = null }"
+      @update:open="onUninstallModalOpenChange"
     >
       <template #footer>
         <div class="flex w-full justify-end gap-2">
