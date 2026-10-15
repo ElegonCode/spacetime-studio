@@ -21,15 +21,12 @@ export const router = createRouter({
 router.beforeEach((to) => {
   const { canAccess } = useConnections();
   if (!canAccess.value && !connectionIndependentPages.includes(to.path)) {
-    pageNavigationLoadingPath.value = router.currentRoute.value.path === "/tables"
-      ? null
-      : "/tables";
+    pageNavigationLoadingPath.value =
+      router.currentRoute.value.path === "/tables" ? null : "/tables";
     return "/tables";
   }
 
-  pageNavigationLoadingPath.value = to.path === router.currentRoute.value.path
-    ? null
-    : to.path;
+  pageNavigationLoadingPath.value = to.path === router.currentRoute.value.path ? null : to.path;
 });
 
 router.afterEach(() => {

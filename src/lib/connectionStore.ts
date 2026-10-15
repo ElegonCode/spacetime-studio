@@ -50,9 +50,7 @@ const lastCheckFailed = ref(false);
 // The navigation gate. Kept permissive while the first check of a selection is
 // in flight so a reload on, say, the tables page is not bounced to the landing
 // page mid-check; only a confirmed failure or no selection at all locks the app.
-const canAccess = computed(
-  () => selectedId.value !== null && !lastCheckFailed.value,
-);
+const canAccess = computed(() => selectedId.value !== null && !lastCheckFailed.value);
 
 // Guards against an earlier, slower check overwriting the result of a newer one.
 let checkToken = 0;

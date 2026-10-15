@@ -1,10 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { getSelectedConnectionId, streamLogs, type LogEvent } from "../lib/spacetime";
-import {
-  clearPageRefreshHandler,
-  setPageRefreshHandler,
-} from "../lib/pageActions";
+import { clearPageRefreshHandler, setPageRefreshHandler } from "../lib/pageActions";
 
 type LogLevel = "error" | "warning" | "info" | "debug";
 type StreamStatus = "idle" | "connecting" | "live" | "ended" | "error";
@@ -35,7 +32,10 @@ const LEVEL_FILTERS = [
 ];
 const LEVEL_RANK: Record<LogLevel, number> = { debug: 0, info: 1, warning: 2, error: 3 };
 
-const STATUS_BADGES: Record<StreamStatus, { label: string; color: "success" | "warning" | "error" | "neutral" }> = {
+const STATUS_BADGES: Record<
+  StreamStatus,
+  { label: string; color: "success" | "warning" | "error" | "neutral" }
+> = {
   idle: { label: "Idle", color: "neutral" },
   connecting: { label: "Connecting", color: "warning" },
   live: { label: "Live", color: "success" },
@@ -58,9 +58,7 @@ function formatTimestamp(raw: unknown): string {
   if (typeof raw === "number") {
     micros = raw;
   } else if (raw && typeof raw === "object") {
-    const nested = (raw as Record<string, unknown>)[
-      "__timestamp_micros_since_unix_epoch__"
-    ];
+    const nested = (raw as Record<string, unknown>)["__timestamp_micros_since_unix_epoch__"];
     if (typeof nested === "number") micros = nested;
   }
   if (micros === undefined) return "";
@@ -216,7 +214,12 @@ onUnmounted(() => {
           aria-label="Filter log messages"
           class="w-56"
         />
-        <USelect v-model="levelFilter" :items="LEVEL_FILTERS" class="w-36" aria-label="Minimum level" />
+        <USelect
+          v-model="levelFilter"
+          :items="LEVEL_FILTERS"
+          class="w-36"
+          aria-label="Minimum level"
+        />
         <UBadge color="neutral" variant="subtle">
           {{ visibleEntries.length }}/{{ entries.length }} lines
         </UBadge>
@@ -251,13 +254,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <UAlert
-      v-if="error"
-      color="error"
-      variant="subtle"
-      :description="error"
-      class="shrink-0"
-    />
+    <UAlert v-if="error" color="error" variant="subtle" :description="error" class="shrink-0" />
 
     <div
       ref="scroller"

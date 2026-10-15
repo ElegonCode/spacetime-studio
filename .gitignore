@@ -27,3 +27,4 @@ dist-ssr
 auto-imports.d.ts
 components.d.ts
 /.claude
+.claude/

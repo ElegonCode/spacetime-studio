@@ -1,7 +1,12 @@
 import { ref } from "vue";
 import {
-  errorMessage, getLocalInstallations, getSpacetimeReleases, manageSpacetimeVersion,
-  type LocalInstallations, type SpacetimeRelease, type VersionAction,
+  errorMessage,
+  getLocalInstallations,
+  getSpacetimeReleases,
+  manageSpacetimeVersion,
+  type LocalInstallations,
+  type SpacetimeRelease,
+  type VersionAction,
 } from "./ecosystem";
 
 // Keep operation state alive when navigating away so a download cannot be
@@ -23,9 +28,13 @@ export async function refreshInstallations() {
   if (installationsLoading.value || versionOperation.value) return;
   installationsLoading.value = true;
   installationError.value = null;
-  try { localInstallations.value = await getLocalInstallations(); }
-  catch (error) { installationError.value = errorMessage(error); }
-  finally { installationsLoading.value = false; }
+  try {
+    localInstallations.value = await getLocalInstallations();
+  } catch (error) {
+    installationError.value = errorMessage(error);
+  } finally {
+    installationsLoading.value = false;
+  }
 }
 
 export async function refreshReleases(append = false) {
@@ -36,16 +45,27 @@ export async function refreshReleases(append = false) {
     const page = append ? releasePage + 1 : 1;
     const releases = await getSpacetimeReleases(page);
     const existing = append ? spacetimeReleases.value : [];
-    spacetimeReleases.value = [...new Map([...existing, ...releases].map((r) => [r.version, r])).values()];
+    spacetimeReleases.value = [
+      ...new Map([...existing, ...releases].map((r) => [r.version, r])).values(),
+    ];
     releasePage = page;
     moreReleasesAvailable.value = releases.length > 0;
-  } catch (error) { releasesError.value = errorMessage(error); }
-  finally { releasesLoading.value = false; }
+  } catch (error) {
+    releasesError.value = errorMessage(error);
+  } finally {
+    releasesLoading.value = false;
+  }
 }
 
 export async function runVersionOperation(action: VersionAction, version?: string) {
-  if (versionOperation.value || installationsLoading.value || !localInstallations.value?.cliPath
-    || localInstallations.value.managementError || installationError.value) return;
+  if (
+    versionOperation.value ||
+    installationsLoading.value ||
+    !localInstallations.value?.cliPath ||
+    localInstallations.value.managementError ||
+    installationError.value
+  )
+    return;
   versionOperation.value = { action, version };
   operationError.value = null;
   operationMessage.value = null;
@@ -54,13 +74,21 @@ export async function runVersionOperation(action: VersionAction, version?: strin
     const result = await manageSpacetimeVersion(action, version);
     localInstallations.value = result.status;
     operationOutput.value = result.output;
-    operationMessage.value = action === "install" ? `SpacetimeDB ${version} installed.`
-      : action === "uninstall" ? `SpacetimeDB ${version} uninstalled.`
-      : `SpacetimeDB ${result.status.currentVersion} is now the active version. Restart the local server to use it.`;
+    operationMessage.value =
+      action === "install"
+        ? `SpacetimeDB ${version} installed.`
+        : action === "uninstall"
+          ? `SpacetimeDB ${version} uninstalled.`
+          : `SpacetimeDB ${result.status.currentVersion} is now the active version. Restart the local server to use it.`;
   } catch (error) {
     operationError.value = errorMessage(error);
     // An updater can change files before reporting failure. Always re-detect.
-    try { localInstallations.value = await getLocalInstallations(); }
-    catch (refreshError) { installationError.value = errorMessage(refreshError); }
-  } finally { versionOperation.value = null; }
+    try {
+      localInstallations.value = await getLocalInstallations();
+    } catch (refreshError) {
+      installationError.value = errorMessage(refreshError);
+    }
+  } finally {
+    versionOperation.value = null;
+  }
 }

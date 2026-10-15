@@ -17,7 +17,9 @@ const { selectedConnection, status, statusMessage } = useConnections();
 const appVersion = ref("Loading…");
 const formattedLastUpdateCheck = computed(() =>
   lastUpdateCheck.value
-    ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(lastUpdateCheck.value)
+    ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
+        lastUpdateCheck.value,
+      )
     : "Never",
 );
 
@@ -43,14 +45,18 @@ onMounted(async () => {
     <div class="mx-auto max-w-3xl space-y-6">
       <section>
         <h1 class="text-lg font-semibold text-highlighted">Settings</h1>
-        <p class="mt-1 text-sm text-muted">Configure Spacetime Studio and its database connections.</p>
+        <p class="mt-1 text-sm text-muted">
+          Configure Spacetime Studio and its database connections.
+        </p>
       </section>
 
       <UCard>
         <div class="flex items-start justify-between gap-4">
           <div>
             <h2 class="font-medium text-highlighted">Active connection</h2>
-            <p class="mt-1 text-sm text-muted">Manage the database profile used by the workspace.</p>
+            <p class="mt-1 text-sm text-muted">
+              Manage the database profile used by the workspace.
+            </p>
           </div>
           <UButton
             icon="i-lucide-pencil"
@@ -66,7 +72,7 @@ onMounted(async () => {
         <dl class="mt-5 grid gap-4 border-t border-default pt-4 sm:grid-cols-2">
           <div>
             <dt class="text-xs font-medium uppercase tracking-wide text-muted">Name</dt>
-            <dd class="mt-1 text-sm text-highlighted">{{ selectedConnection?.name ?? 'None' }}</dd>
+            <dd class="mt-1 text-sm text-highlighted">{{ selectedConnection?.name ?? "None" }}</dd>
           </div>
           <div>
             <dt class="text-xs font-medium uppercase tracking-wide text-muted">Status</dt>
@@ -74,11 +80,15 @@ onMounted(async () => {
           </div>
           <div>
             <dt class="text-xs font-medium uppercase tracking-wide text-muted">Database</dt>
-            <dd class="mt-1 break-all text-sm text-highlighted">{{ selectedConnection?.database ?? '—' }}</dd>
+            <dd class="mt-1 break-all text-sm text-highlighted">
+              {{ selectedConnection?.database ?? "—" }}
+            </dd>
           </div>
           <div>
             <dt class="text-xs font-medium uppercase tracking-wide text-muted">Host</dt>
-            <dd class="mt-1 break-all text-sm text-highlighted">{{ selectedConnection?.baseUrl ?? '—' }}</dd>
+            <dd class="mt-1 break-all text-sm text-highlighted">
+              {{ selectedConnection?.baseUrl ?? "—" }}
+            </dd>
           </div>
         </dl>
       </UCard>
@@ -123,9 +133,7 @@ onMounted(async () => {
             <p v-else-if="availableUpdate" class="mt-1 text-sm text-primary">
               Version {{ availableUpdate.version }} is available.
             </p>
-            <p v-else-if="lastUpdateCheck" class="mt-1 text-sm text-muted">
-              No update was found.
-            </p>
+            <p v-else-if="lastUpdateCheck" class="mt-1 text-sm text-muted">No update was found.</p>
           </div>
           <UButton
             icon="i-lucide-refresh-cw"
@@ -135,7 +143,11 @@ onMounted(async () => {
             :disabled="checkingForUpdate || updateCheckCooldown > 0"
             @click="checkForUpdate"
           >
-            {{ updateCheckCooldown > 0 ? `Check again in ${updateCheckCooldown}s` : 'Check for updates' }}
+            {{
+              updateCheckCooldown > 0
+                ? `Check again in ${updateCheckCooldown}s`
+                : "Check for updates"
+            }}
           </UButton>
         </div>
       </UCard>

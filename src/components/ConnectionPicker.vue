@@ -5,7 +5,12 @@ import { deleteConnection, type ConnectionProfile } from "../lib/spacetime";
 import { useConnections, type Reachability } from "../lib/connectionStore";
 import { editorOpen, editorTarget, openConnectionEditor } from "../lib/connectionUi";
 import { hostLabel } from "../lib/hosts";
-import { serverAction, serverOutputOpen, serverStatus, setServerPolling } from "../lib/localServerStore";
+import {
+  serverAction,
+  serverOutputOpen,
+  serverStatus,
+  setServerPolling,
+} from "../lib/localServerStore";
 import ConnectionEditor from "./ConnectionEditor.vue";
 import LocalServerControl from "./LocalServerControl.vue";
 
@@ -321,13 +326,15 @@ async function confirmDelete() {
   <UModal
     v-model:open="serverOutputOpen"
     title="Local server output"
-    :description="serverStatus?.exitMessage ?? 'The most recent output from the local SpacetimeDB server.'"
+    :description="
+      serverStatus?.exitMessage ?? 'The most recent output from the local SpacetimeDB server.'
+    "
     :ui="{ content: 'sm:max-w-3xl' }"
   >
     <template #body>
-      <pre
-        class="max-h-[60vh] overflow-auto text-xs break-words whitespace-pre-wrap text-muted"
-      >{{ serverStatus?.output.length ? serverStatus.output.join("\n") : "No output yet." }}</pre>
+      <pre class="max-h-[60vh] overflow-auto text-xs break-words whitespace-pre-wrap text-muted">{{
+        serverStatus?.output.length ? serverStatus.output.join("\n") : "No output yet."
+      }}</pre>
     </template>
   </UModal>
 
@@ -339,7 +346,15 @@ async function confirmDelete() {
   >
     <template #footer>
       <div class="flex w-full justify-end gap-2">
-        <UButton color="neutral" variant="soft" @click="() => { pendingDelete = null }">
+        <UButton
+          color="neutral"
+          variant="soft"
+          @click="
+            () => {
+              pendingDelete = null;
+            }
+          "
+        >
           Cancel
         </UButton>
         <UButton color="error" :loading="deleting" @click="confirmDelete">Delete</UButton>

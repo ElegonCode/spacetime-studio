@@ -43,9 +43,26 @@ function getSqlModel(id: number | string, value: string) {
 }
 
 const sqlKeywords = [
-  "SELECT", "FROM", "WHERE", "AND", "OR", "AS", "LIMIT", "JOIN", "INNER", "ON",
-  "INSERT", "INTO", "VALUES", "UPDATE", "SET", "DELETE", "SHOW", "COUNT",
-  "TRUE", "FALSE",
+  "SELECT",
+  "FROM",
+  "WHERE",
+  "AND",
+  "OR",
+  "AS",
+  "LIMIT",
+  "JOIN",
+  "INNER",
+  "ON",
+  "INSERT",
+  "INTO",
+  "VALUES",
+  "UPDATE",
+  "SET",
+  "DELETE",
+  "SHOW",
+  "COUNT",
+  "TRUE",
+  "FALSE",
 ];
 
 monaco.languages.register({ id: "sql" });
@@ -86,19 +103,24 @@ function registerCompletions() {
       const statementStart = beforeCursor.lastIndexOf(";") + 1;
       const cursorOffset = model.getOffsetAt(position);
       const nextSemicolon = model.getValue().indexOf(";", cursorOffset);
-      const statement = model.getValue().slice(
-        statementStart,
-        nextSemicolon < 0 ? model.getValue().length : nextSemicolon,
-      );
+      const statement = model
+        .getValue()
+        .slice(statementStart, nextSemicolon < 0 ? model.getValue().length : nextSemicolon);
       const statementPrefix = beforeCursor.slice(statementStart);
       const qualified = statementPrefix.match(/(?:^|[\s,(])([\w$]+)\.([\w$]*)$/);
-      const tableExpected = /\b(?:FROM|JOIN|UPDATE|INTO)\s+(?:"[^"]*|[\w$]*)$/i.test(statementPrefix);
+      const tableExpected = /\b(?:FROM|JOIN|UPDATE|INTO)\s+(?:"[^"]*|[\w$]*)$/i.test(
+        statementPrefix,
+      );
 
       const tablesByQualifier = new Map<string, TableSummary>();
       const referencedTables: TableSummary[] = [];
-      for (const match of statement.matchAll(/\b(?:FROM|JOIN|UPDATE|INTO)\s+(?:"([^"]+)"|([\w$]+))(?:\s+(?:AS\s+)?(?:"([^"]+)"|([\w$]+)))?/gi)) {
+      for (const match of statement.matchAll(
+        /\b(?:FROM|JOIN|UPDATE|INTO)\s+(?:"([^"]+)"|([\w$]+))(?:\s+(?:AS\s+)?(?:"([^"]+)"|([\w$]+)))?/gi,
+      )) {
         const tableName = match[1] ?? match[2];
-        const table = props.tables.find((item) => item.name.toLowerCase() === tableName.toLowerCase());
+        const table = props.tables.find(
+          (item) => item.name.toLowerCase() === tableName.toLowerCase(),
+        );
         const alias = match[3] ?? match[4];
         if (table && alias && !/^(WHERE|JOIN|INNER|ON|LIMIT|SET|AND|OR)$/i.test(alias)) {
           tablesByQualifier.set(alias.toLowerCase(), table);
@@ -109,7 +131,11 @@ function registerCompletions() {
         }
       }
 
-      const clauses = [...statementPrefix.matchAll(/\b(SELECT|FROM|JOIN|WHERE|AND|OR|ON|SET|UPDATE|INTO|DELETE|INSERT|LIMIT|VALUES)\b/gi)];
+      const clauses = [
+        ...statementPrefix.matchAll(
+          /\b(SELECT|FROM|JOIN|WHERE|AND|OR|ON|SET|UPDATE|INTO|DELETE|INSERT|LIMIT|VALUES)\b/gi,
+        ),
+      ];
       const lastClauseMatch = clauses[clauses.length - 1];
       const lastClause = lastClauseMatch?.[1].toUpperCase() ?? "";
       const clauseTail = lastClauseMatch
@@ -118,7 +144,10 @@ function registerCompletions() {
       const tail = clauseTail.trim();
       const trailingSpace = /\s$/.test(statementPrefix);
       const isComparison = /(?:=|!=|<>|<=|>=|<|>)\s*$/.test(tail);
-      const hasValue = /(?:=|!=|<>|<=|>=|<|>)\s*(?:true|false|'(?:[^']|'')*'|(?:0[xX][\da-f]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?))\s*$/i.test(tail);
+      const hasValue =
+        /(?:=|!=|<>|<=|>=|<|>)\s*(?:true|false|'(?:[^']|'')*'|(?:0[xX][\da-f]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?))\s*$/i.test(
+          tail,
+        );
 
       let keywordItems: string[] = [];
       let showTables = false;
@@ -143,9 +172,8 @@ function registerCompletions() {
         if (tail && !trailingSpace) {
           showTables = true;
         } else {
-          keywordItems = lastClause === "JOIN"
-            ? ["ON", "JOIN", "WHERE", "LIMIT"]
-            : ["JOIN", "WHERE", "LIMIT"];
+          keywordItems =
+            lastClause === "JOIN" ? ["ON", "JOIN", "WHERE", "LIMIT"] : ["JOIN", "WHERE", "LIMIT"];
         }
       } else if (lastClause === "UPDATE") {
         keywordItems = tail && !trailingSpace ? [] : ["SET"];
@@ -208,7 +236,9 @@ function registerCompletions() {
         : undefined;
       if (showFields) {
         const tables = qualified
-          ? (qualifiedTable ? [qualifiedTable] : [])
+          ? qualifiedTable
+            ? [qualifiedTable]
+            : []
           : referencedTables.slice(0, 1);
         for (const table of tables) {
           for (const column of table.columns) {
@@ -252,12 +282,15 @@ function registerCompletions() {
 }
 
 watch(() => props.tables, registerCompletions);
-watch(() => [props.modelId, props.modelValue] as const, ([id, value]) => {
-  const model = getSqlModel(id, value);
-  if (!editor) return;
-  if (editor.getModel() !== model) editor.setModel(model);
-  if (model.getValue() !== value) model.setValue(value);
-});
+watch(
+  () => [props.modelId, props.modelValue] as const,
+  ([id, value]) => {
+    const model = getSqlModel(id, value);
+    if (!editor) return;
+    if (editor.getModel() !== model) editor.setModel(model);
+    if (model.getValue() !== value) model.setValue(value);
+  },
+);
 
 onMounted(() => {
   if (!host.value) return;

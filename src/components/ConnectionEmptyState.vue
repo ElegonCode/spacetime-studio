@@ -25,9 +25,7 @@ const failed = computed(() => lastCheckFailed.value && selectedConnection.value 
     </div>
 
     <div v-else class="max-w-sm text-center">
-      <div
-        class="mx-auto mb-4 flex size-12 items-center justify-center rounded-full bg-elevated"
-      >
+      <div class="mx-auto mb-4 flex size-12 items-center justify-center rounded-full bg-elevated">
         <UIcon
           :name="failed ? 'i-lucide-unplug' : 'i-lucide-plug'"
           class="size-6"

@@ -21,10 +21,7 @@ window.setInterval(() => {
 
 export const updateCheckCooldown = computed(() => {
   if (!lastUpdateCheck.value) return 0;
-  return Math.max(
-    0,
-    Math.ceil((lastUpdateCheck.value.getTime() + cooldownMs - now.value) / 1000),
-  );
+  return Math.max(0, Math.ceil((lastUpdateCheck.value.getTime() + cooldownMs - now.value) / 1000));
 });
 
 export async function checkForUpdate() {

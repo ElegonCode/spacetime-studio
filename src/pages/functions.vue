@@ -11,10 +11,7 @@ import {
   isSwitchedAway,
 } from "../lib/spacetime";
 import { kindBadgeColor, parseArg } from "../lib/cells";
-import {
-  clearPageRefreshHandler,
-  setPageRefreshHandler,
-} from "../lib/pageActions";
+import { clearPageRefreshHandler, setPageRefreshHandler } from "../lib/pageActions";
 import { dataTableUi } from "../lib/tableUi";
 import { useConnections } from "../lib/connectionStore";
 
@@ -38,8 +35,10 @@ function typeLabel(fn: FunctionSummary) {
 // The server runs lifecycle reducers itself and rejects direct calls to them.
 function blockedReason(fn: FunctionSummary | null) {
   if (!fn) return "";
-  if (fn.lifecycle) return "Lifecycle reducers are run by SpacetimeDB and can't be called directly.";
-  if (readOnly.value) return "This connection is read-only. Turn off read-only mode in its settings to call reducers.";
+  if (fn.lifecycle)
+    return "Lifecycle reducers are run by SpacetimeDB and can't be called directly.";
+  if (readOnly.value)
+    return "This connection is read-only. Turn off read-only mode in its settings to call reducers.";
   return "";
 }
 
@@ -131,10 +130,7 @@ function onSelectFunction(_: Event, row: TableRow<FunctionSummary>) {
 }
 
 const selectedFunction = computed<FunctionSummary | null>(
-  () =>
-    (schema.value?.reducers ?? []).find(
-      (fn) => fn.name === selectedFunctionName.value,
-    ) ?? null,
+  () => (schema.value?.reducers ?? []).find((fn) => fn.name === selectedFunctionName.value) ?? null,
 );
 
 const formattedRunResult = computed(() => {
@@ -182,10 +178,7 @@ function getBooleanParam(paramName: string) {
   return paramForm.value[paramName] === true;
 }
 
-function setBooleanParam(
-  paramName: string,
-  value: boolean | "indeterminate",
-) {
+function setBooleanParam(paramName: string, value: boolean | "indeterminate") {
   paramForm.value[paramName] = value === true;
 }
 
@@ -226,11 +219,7 @@ async function runSelectedFunction() {
   runResult.value = null;
 
   try {
-    const result = await runFunction(
-      connectionId.value,
-      selectedFunction.value.name,
-      args,
-    );
+    const result = await runFunction(connectionId.value, selectedFunction.value.name, args);
     runResult.value = result;
     status.value = `${selectedFunction.value.name} ran successfully.`;
   } catch (err) {
@@ -266,13 +255,7 @@ onUnmounted(() => {
       >
     </div>
 
-    <UAlert
-      v-if="error"
-      color="error"
-      variant="subtle"
-      :description="error"
-      class="shrink-0"
-    />
+    <UAlert v-if="error" color="error" variant="subtle" :description="error" class="shrink-0" />
     <UTable
       :data="functions"
       :columns="columns"
@@ -292,7 +275,9 @@ onUnmounted(() => {
           :color="row.original.lifecycle ? 'warning' : 'neutral'"
           variant="subtle"
           :icon="row.original.scheduledBy ? 'i-lucide-timer' : undefined"
-          :title="row.original.scheduledBy ? `Fired by rows in ${row.original.scheduledBy}` : undefined"
+          :title="
+            row.original.scheduledBy ? `Fired by rows in ${row.original.scheduledBy}` : undefined
+          "
           >{{ typeLabel(row.original) }}</UBadge
         >
       </template>
@@ -311,7 +296,11 @@ onUnmounted(() => {
             v-if="hiddenParams(row.original).length"
             variant="outline"
             color="neutral"
-            :title="hiddenParams(row.original).map((p) => `${p.name}: ${p.type}`).join('\n')"
+            :title="
+              hiddenParams(row.original)
+                .map((p) => `${p.name}: ${p.type}`)
+                .join('\n')
+            "
           >
             +{{ hiddenParams(row.original).length }}
           </UBadge>
@@ -349,18 +338,8 @@ onUnmounted(() => {
             icon="i-lucide-timer"
             :description="`Scheduled: SpacetimeDB calls this whenever a row in ${selectedFunction.scheduledBy} comes due.`"
           />
-          <UAlert
-            v-if="status"
-            color="success"
-            variant="subtle"
-            :description="status"
-          />
-          <UAlert
-            v-if="runError"
-            color="error"
-            variant="subtle"
-            :description="runError"
-          />
+          <UAlert v-if="status" color="success" variant="subtle" :description="status" />
+          <UAlert v-if="runError" color="error" variant="subtle" :description="runError" />
 
           <UForm
             id="function-runner-form"
@@ -414,16 +393,14 @@ onUnmounted(() => {
             <p class="text-xs font-medium text-muted">Result</p>
             <pre
               class="max-h-72 overflow-auto rounded-md border border-default bg-default/40 p-3 text-xs text-highlighted"
-            >{{ formattedRunResult }}</pre>
+              >{{ formattedRunResult }}</pre>
           </div>
         </div>
       </template>
 
       <template #footer="{ close }">
         <div class="flex w-full justify-end gap-2">
-          <UButton color="neutral" variant="soft" @click="close"
-            >Cancel</UButton
-          >
+          <UButton color="neutral" variant="soft" @click="close">Cancel</UButton>
           <UButton
             icon="i-lucide-play"
             :loading="running"

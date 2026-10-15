@@ -19,10 +19,7 @@ import {
   isSwitchedAway,
 } from "../lib/spacetime";
 import { cellToInput, formatCell, isEditable, parseInput } from "../lib/cells";
-import {
-  clearPageRefreshHandler,
-  setPageRefreshHandler,
-} from "../lib/pageActions";
+import { clearPageRefreshHandler, setPageRefreshHandler } from "../lib/pageActions";
 import { dataTableUi, selectedCellUi } from "../lib/tableUi";
 import { useConnections } from "../lib/connectionStore";
 import ConnectionEmptyState from "../components/ConnectionEmptyState.vue";
@@ -53,26 +50,50 @@ function loadTableTabState(connectionId: string | null): SavedTableTabState {
   try {
     const raw = localStorage.getItem(TABLE_TABS_KEY);
     const stored = JSON.parse(raw ?? "null");
-    if (stored && typeof stored === "object" && stored.byConnection && typeof stored.byConnection === "object") {
+    if (
+      stored &&
+      typeof stored === "object" &&
+      stored.byConnection &&
+      typeof stored.byConnection === "object"
+    ) {
       const state = connectionId ? stored.byConnection[connectionId] : null;
-      return state && typeof state === "object" ? normalizeTableTabState(state) : { exists: false, tabs: [], active: "", pinned: [] };
+      return state && typeof state === "object"
+        ? normalizeTableTabState(state)
+        : { exists: false, tabs: [], active: "", pinned: [] };
     }
-    if (!stored || typeof stored !== "object" || !Array.isArray(stored.tabs)) return { exists: false, tabs: [], active: "", pinned: [] };
+    if (!stored || typeof stored !== "object" || !Array.isArray(stored.tabs))
+      return { exists: false, tabs: [], active: "", pinned: [] };
     const state = normalizeTableTabState(stored);
     // Migrate the previous single-connection format to the selected connection.
-    if (connectionId) localStorage.setItem(TABLE_TABS_KEY, JSON.stringify({ byConnection: { [connectionId]: state } }));
+    if (connectionId)
+      localStorage.setItem(
+        TABLE_TABS_KEY,
+        JSON.stringify({ byConnection: { [connectionId]: state } }),
+      );
     return state;
   } catch {
     return { exists: false, tabs: [], active: "", pinned: [] };
   }
 }
 
-function normalizeTableTabState(stored: { tabs?: unknown; active?: unknown; pinned?: unknown }): SavedTableTabState {
+function normalizeTableTabState(stored: {
+  tabs?: unknown;
+  active?: unknown;
+  pinned?: unknown;
+}): SavedTableTabState {
   return {
     exists: true,
-    tabs: Array.isArray(stored.tabs) ? Array.from(new Set<string>(stored.tabs.filter((name: unknown): name is string => typeof name === "string"))) : [],
+    tabs: Array.isArray(stored.tabs)
+      ? Array.from(
+          new Set<string>(
+            stored.tabs.filter((name: unknown): name is string => typeof name === "string"),
+          ),
+        )
+      : [],
     active: typeof stored.active === "string" ? stored.active : "",
-    pinned: Array.isArray(stored.pinned) ? stored.pinned.filter((name: unknown): name is string => typeof name === "string") : [],
+    pinned: Array.isArray(stored.pinned)
+      ? stored.pinned.filter((name: unknown): name is string => typeof name === "string")
+      : [],
   };
 }
 
@@ -80,10 +101,17 @@ function saveTableTabState(connectionId: string | null, state: Omit<SavedTableTa
   if (!connectionId) return;
   try {
     const stored = JSON.parse(localStorage.getItem(TABLE_TABS_KEY) ?? "null");
-    const byConnection = stored && typeof stored === "object" && stored.byConnection && typeof stored.byConnection === "object"
-      ? stored.byConnection
-      : {};
-    localStorage.setItem(TABLE_TABS_KEY, JSON.stringify({ byConnection: { ...byConnection, [connectionId]: state } }));
+    const byConnection =
+      stored &&
+      typeof stored === "object" &&
+      stored.byConnection &&
+      typeof stored.byConnection === "object"
+        ? stored.byConnection
+        : {};
+    localStorage.setItem(
+      TABLE_TABS_KEY,
+      JSON.stringify({ byConnection: { ...byConnection, [connectionId]: state } }),
+    );
   } catch {
     // Tab restoration is a convenience; the current session remains usable.
   }
@@ -102,7 +130,15 @@ const tableSidebarWidth = ref(loadTableSidebarWidth());
 const isTableSidebarResizing = ref(false);
 const tableGridTemplateColumns = computed(() => `${tableSidebarWidth.value}px 1px minmax(0, 1fr)`);
 let tableSidebarResize: { pointerId: number; startX: number; startWidth: number } | null = null;
-const draggedTableTab = ref<{ name: string; pointerId: number; startX: number; startY: number; grabX: number; grabY: number; dragging: boolean } | null>(null);
+const draggedTableTab = ref<{
+  name: string;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  grabX: number;
+  grabY: number;
+  dragging: boolean;
+} | null>(null);
 const tableDragPreview = ref<HTMLElement | null>(null);
 let tableTabReorderFrame = 0;
 let latestTableTabPointerEvent: PointerEvent | null = null;
@@ -181,18 +217,22 @@ function endTableSidebarResize(event: PointerEvent) {
 }
 
 function adjustTableSidebarWidth(event: KeyboardEvent) {
-  const width = event.key === "Home"
-    ? TABLE_SIDEBAR_MIN_WIDTH
-    : event.key === "End"
-      ? TABLE_SIDEBAR_MAX_WIDTH
-      : event.key === "ArrowLeft"
-        ? tableSidebarWidth.value - 16
-        : event.key === "ArrowRight"
-          ? tableSidebarWidth.value + 16
-          : null;
+  const width =
+    event.key === "Home"
+      ? TABLE_SIDEBAR_MIN_WIDTH
+      : event.key === "End"
+        ? TABLE_SIDEBAR_MAX_WIDTH
+        : event.key === "ArrowLeft"
+          ? tableSidebarWidth.value - 16
+          : event.key === "ArrowRight"
+            ? tableSidebarWidth.value + 16
+            : null;
   if (width === null) return;
   event.preventDefault();
-  tableSidebarWidth.value = Math.max(TABLE_SIDEBAR_MIN_WIDTH, Math.min(TABLE_SIDEBAR_MAX_WIDTH, width));
+  tableSidebarWidth.value = Math.max(
+    TABLE_SIDEBAR_MIN_WIDTH,
+    Math.min(TABLE_SIDEBAR_MAX_WIDTH, width),
+  );
   try {
     localStorage.setItem(TABLE_SIDEBAR_WIDTH_KEY, String(tableSidebarWidth.value));
   } catch {
@@ -205,9 +245,7 @@ const filteredTables = computed(() => {
   const search = tableSearch.value.trim().toLowerCase();
   if (!search) return tables.value;
 
-  return tables.value.filter((table) =>
-    table.name.toLowerCase().includes(search),
-  );
+  return tables.value.filter((table) => table.name.toLowerCase().includes(search));
 });
 function isPrivateTable(table: TableSummary) {
   return table.access.toLowerCase() === "private";
@@ -267,13 +305,22 @@ function startTableTabPointerDrag(event: PointerEvent) {
   const name = openTableTabs.value[index];
   if (!name) return;
   const rect = trigger.getBoundingClientRect();
-  draggedTableTab.value = { name, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, grabX: event.clientX - rect.left, grabY: event.clientY - rect.top, dragging: false };
+  draggedTableTab.value = {
+    name,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    grabX: event.clientX - rect.left,
+    grabY: event.clientY - rect.top,
+    dragging: false,
+  };
 }
 
 function moveTableTabPointerDrag(event: PointerEvent) {
   const drag = draggedTableTab.value;
   if (!drag || drag.pointerId !== event.pointerId) return;
-  if (!drag.dragging && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
+  if (!drag.dragging && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6)
+    return;
   drag.dragging = true;
   positionTableDragPreview(drag, event.clientX, event.clientY);
   event.preventDefault();
@@ -295,7 +342,11 @@ function moveTableTabPointerDrag(event: PointerEvent) {
   }
 }
 
-function positionTableDragPreview(drag: NonNullable<typeof draggedTableTab.value>, x: number, y: number) {
+function positionTableDragPreview(
+  drag: NonNullable<typeof draggedTableTab.value>,
+  x: number,
+  y: number,
+) {
   const position = () => {
     if (draggedTableTab.value !== drag || !tableDragPreview.value) return;
     tableDragPreview.value.style.transform = `translate3d(${x - drag.grabX}px, ${y - drag.grabY}px, 0)`;
@@ -304,7 +355,10 @@ function positionTableDragPreview(drag: NonNullable<typeof draggedTableTab.value
   else void nextTick(position);
 }
 
-function reorderTableTabAtPointer(event: PointerEvent, drag: NonNullable<typeof draggedTableTab.value>) {
+function reorderTableTabAtPointer(
+  event: PointerEvent,
+  drag: NonNullable<typeof draggedTableTab.value>,
+) {
   const list = tableTabsBar.value?.querySelector<HTMLElement>('[data-slot="list"]');
   if (!list) return;
   const hit = document.elementFromPoint(event.clientX, event.clientY);
@@ -335,7 +389,12 @@ function reorderTableTabAtPointer(event: PointerEvent, drag: NonNullable<typeof 
   sourceGroup.splice(Math.max(0, insertAt), 0, draggedName);
   const reordered = [...pinned, ...unpinned];
   if (reordered.some((name, index) => name !== openTableTabs.value[index])) {
-    const previousRects = new Map(Array.from(list.querySelectorAll<HTMLElement>('[role="tab"]')).map((tab, index) => [openTableTabs.value[index], tab.getBoundingClientRect()]));
+    const previousRects = new Map(
+      Array.from(list.querySelectorAll<HTMLElement>('[role="tab"]')).map((tab, index) => [
+        openTableTabs.value[index],
+        tab.getBoundingClientRect(),
+      ]),
+    );
     pinnedTableTabs.value = reordered.filter(isPinned);
     openTableTabs.value = reordered;
     void nextTick(() => {
@@ -348,7 +407,10 @@ function reorderTableTabAtPointer(event: PointerEvent, drag: NonNullable<typeof 
         const y = previous.top - current.top;
         if (Math.abs(x) + Math.abs(y) < 1) return;
         tab.getAnimations().forEach((animation) => animation.cancel());
-        tab.animate([{ transform: `translate(${x}px, ${y}px)` }, { transform: "translate(0, 0)" }], { duration: 130, easing: "ease-out" });
+        tab.animate(
+          [{ transform: `translate(${x}px, ${y}px)` }, { transform: "translate(0, 0)" }],
+          { duration: 130, easing: "ease-out" },
+        );
       });
     });
   }
@@ -365,7 +427,9 @@ function endTableTabPointerDrag(event: PointerEvent) {
     reorderTableTabAtPointer(event, drag);
     suppressTableTabClick = true;
     if (suppressTableTabClickTimer) clearTimeout(suppressTableTabClickTimer);
-    suppressTableTabClickTimer = setTimeout(() => { suppressTableTabClick = false; }, 300);
+    suppressTableTabClickTimer = setTimeout(() => {
+      suppressTableTabClick = false;
+    }, 300);
   }
   draggedTableTab.value = null;
 }
@@ -397,7 +461,11 @@ const tableContextMenuItems = computed(() => {
   const name = contextTableTab.value;
   const pinned = pinnedTableTabs.value.includes(name);
   return [
-    { label: pinned ? "Unpin tab" : "Pin tab", icon: pinned ? "i-lucide-pin-off" : "i-lucide-pin", onSelect: () => togglePinnedTableTab(name) },
+    {
+      label: pinned ? "Unpin tab" : "Pin tab",
+      icon: pinned ? "i-lucide-pin-off" : "i-lucide-pin",
+      onSelect: () => togglePinnedTableTab(name),
+    },
   ];
 });
 
@@ -405,7 +473,9 @@ async function measureTableTabOverflow() {
   await nextTick();
   const list = tableTabsBar.value?.querySelector<HTMLElement>('[data-slot="list"]');
   hasMoreTableTabsLeft.value = Boolean(list && list.scrollLeft > 1);
-  hasMoreTableTabsRight.value = Boolean(list && list.scrollLeft + list.clientWidth < list.scrollWidth - 1);
+  hasMoreTableTabsRight.value = Boolean(
+    list && list.scrollLeft + list.clientWidth < list.scrollWidth - 1,
+  );
 }
 
 function closeTableTabFromMiddleClick(event: MouseEvent) {
@@ -420,28 +490,44 @@ function closeTableTabFromMiddleClick(event: MouseEvent) {
   closeTableTab(name);
 }
 
-watch([openTableTabs, () => Boolean(draggedTableTab.value?.dragging)], async ([, dragging]) => {
-  if (dragging) return;
-  await nextTick();
-  void measureTableTabOverflow();
-}, { deep: true });
-watch([openTableTabs, selectedTableName, () => Boolean(draggedTableTab.value?.dragging)], ([tabs, active, dragging]) => {
-  if (dragging) return;
-  hasSavedTableTabState.value = true;
-  try {
-    saveTableTabState(connectionId.value, { tabs, active, pinned: pinnedTableTabs.value });
-  } catch {
-    // Tab restoration is a convenience; the current session remains usable.
-  }
-}, { deep: true });
-watch([pinnedTableTabs, () => Boolean(draggedTableTab.value?.dragging)], ([pinned, dragging]) => {
-  if (dragging) return;
-  try {
-    saveTableTabState(connectionId.value, { tabs: openTableTabs.value, active: selectedTableName.value, pinned });
-  } catch {
-    // Tab restoration is a convenience; the current session remains usable.
-  }
-}, { deep: true });
+watch(
+  [openTableTabs, () => Boolean(draggedTableTab.value?.dragging)],
+  async ([, dragging]) => {
+    if (dragging) return;
+    await nextTick();
+    void measureTableTabOverflow();
+  },
+  { deep: true },
+);
+watch(
+  [openTableTabs, selectedTableName, () => Boolean(draggedTableTab.value?.dragging)],
+  ([tabs, active, dragging]) => {
+    if (dragging) return;
+    hasSavedTableTabState.value = true;
+    try {
+      saveTableTabState(connectionId.value, { tabs, active, pinned: pinnedTableTabs.value });
+    } catch {
+      // Tab restoration is a convenience; the current session remains usable.
+    }
+  },
+  { deep: true },
+);
+watch(
+  [pinnedTableTabs, () => Boolean(draggedTableTab.value?.dragging)],
+  ([pinned, dragging]) => {
+    if (dragging) return;
+    try {
+      saveTableTabState(connectionId.value, {
+        tabs: openTableTabs.value,
+        active: selectedTableName.value,
+        pinned,
+      });
+    } catch {
+      // Tab restoration is a convenience; the current session remains usable.
+    }
+  },
+  { deep: true },
+);
 
 async function scrollActiveTableTabIntoView() {
   await nextTick();
@@ -465,9 +551,7 @@ async function scrollActiveTableTabIntoView() {
 function sectionItems(matches: (table: TableSummary) => boolean) {
   return filteredTables.value
     .filter(matches)
-    .sort(
-      (a, b) => Number(Boolean(b.scheduledReducer)) - Number(Boolean(a.scheduledReducer)),
-    )
+    .sort((a, b) => Number(Boolean(b.scheduledReducer)) - Number(Boolean(a.scheduledReducer)))
     .map(toTabItem);
 }
 
@@ -482,9 +566,7 @@ const tableSections = computed(() =>
 // Sections start expanded; this tracks the ones the user has folded away.
 const collapsedSections = ref<Record<string, boolean>>({});
 const selectedTable = computed<TableSummary | null>(
-  () =>
-    tables.value.find((table) => table.name === selectedTableName.value) ??
-    null,
+  () => tables.value.find((table) => table.name === selectedTableName.value) ?? null,
 );
 // The schema knows the declared types (named structs, enums); the SQL response
 // only knows the structural ones. Prefer the schema's view of each column.
@@ -492,9 +574,7 @@ const pageColumns = computed<ColumnSummary[]>(() => {
   const declared = selectedTable.value?.columns ?? [];
   const returned = tablePage.value?.columns ?? [];
   if (!returned.length) return declared;
-  return returned.map(
-    (column) => declared.find((known) => known.name === column.name) ?? column,
-  );
+  return returned.map((column) => declared.find((known) => known.name === column.name) ?? column);
 });
 
 const rangeLabel = computed(() => {
@@ -503,8 +583,7 @@ const rangeLabel = computed(() => {
   if (!current.rows.length) return current.total ? "No rows on this page" : "No rows";
   const first = page.value * current.pageSize + 1;
   const last = page.value * current.pageSize + current.rows.length;
-  const total =
-    current.total == null ? "" : ` of ${current.total.toLocaleString()}`;
+  const total = current.total == null ? "" : ` of ${current.total.toLocaleString()}`;
   return `Rows ${first.toLocaleString()}–${last.toLocaleString()}${total}`;
 });
 
@@ -557,7 +636,7 @@ function draftText(index: number, row: Row, column: ColumnSummary) {
 }
 
 function setDraft(index: number, row: Row, column: ColumnSummary, text: string) {
-  const rowDraft = { ...(drafts.value[index] ?? {}) };
+  const rowDraft = { ...drafts.value[index] };
   if (text === cellToInput(row[column.name], column)) {
     delete rowDraft[column.name];
   } else {
@@ -581,7 +660,8 @@ function undoPendingEdits() {
 }
 
 async function savePendingEdits() {
-  if (!connectionId.value || !selectedTableName.value || !pendingEditCount.value || savingRow.value) return;
+  if (!connectionId.value || !selectedTableName.value || !pendingEditCount.value || savingRow.value)
+    return;
 
   const totalEdits = pendingEditCount.value;
   const pendingRows = Object.entries(drafts.value);
@@ -592,7 +672,10 @@ async function savePendingEdits() {
     for (const [indexText, rowDraft] of pendingRows) {
       const index = Number(indexText);
       const row = tablePage.value?.rows[index];
-      if (!row) throw new Error("A row with pending edits is no longer on this page. Reload the table before saving.");
+      if (!row)
+        throw new Error(
+          "A row with pending edits is no longer on this page. Reload the table before saving.",
+        );
 
       const changes = Object.fromEntries(
         pageColumns.value
@@ -659,10 +742,7 @@ function newRow() {
   if (!selectedTable.value) return;
   originalRow.value = null;
   rowForm.value = Object.fromEntries(
-    selectedTable.value.columns.map((column) => [
-      column.name,
-      column.kind === "bool" ? false : "",
-    ]),
+    selectedTable.value.columns.map((column) => [column.name, column.kind === "bool" ? false : ""]),
   );
   rowEditorOpen.value = true;
 }
@@ -675,7 +755,9 @@ function editRow(row: Row) {
 
 async function saveRow() {
   if (!connectionId.value || !selectedTable.value) return;
-  const editable = (originalRow.value ? pageColumns.value : selectedTable.value.columns).filter(isEditable);
+  const editable = (originalRow.value ? pageColumns.value : selectedTable.value.columns).filter(
+    isEditable,
+  );
 
   if (originalRow.value) {
     const original = originalRow.value;
@@ -694,7 +776,10 @@ async function saveRow() {
     // (such as auto_inc) or report exactly which column is missing.
     const values = Object.fromEntries(
       editable
-        .filter((column) => column.kind === "string" || column.kind === "bool" || formText(column).trim() !== "")
+        .filter(
+          (column) =>
+            column.kind === "string" || column.kind === "bool" || formText(column).trim() !== "",
+        )
         .map((column) => [column.name, parseInput(formText(column), column)]),
     );
     await persist(
@@ -765,13 +850,13 @@ async function loadSchema() {
     const previous = selectedTableName.value;
     selectedTableName.value = tableNames.has(previous)
       ? previous
-      : (openTableTabs.value[0] ?? (hasSavedTableTabState.value ? "" : loaded.tables[0]?.name ?? ""));
+      : (openTableTabs.value[0] ??
+        (hasSavedTableTabState.value ? "" : (loaded.tables[0]?.name ?? "")));
     if (selectedTableName.value && !openTableTabs.value.includes(selectedTableName.value))
       openTableTabs.value.push(selectedTableName.value);
     void scrollActiveTableTabIntoView();
     // The watcher on selectedTableName loads rows when the name changes.
-    if (selectedTableName.value && selectedTableName.value === previous)
-      await loadRows();
+    if (selectedTableName.value && selectedTableName.value === previous) await loadRows();
   } catch (err) {
     if (isSwitchedAway(err)) return;
     error.value = String(err);
@@ -815,7 +900,12 @@ async function exportRows(format: ExportFormat) {
       activeWhereSql.value.trim() || undefined,
     );
     if (path) {
-      toast.add({ title: "Export saved", description: path, color: "success", icon: "i-lucide-check" });
+      toast.add({
+        title: "Export saved",
+        description: path,
+        color: "success",
+        icon: "i-lucide-check",
+      });
     }
   } catch (err) {
     toast.add({ title: "Export failed", description: String(err), color: "error" });
@@ -850,25 +940,29 @@ watch(selectedTableName, () => {
   void scrollActiveTableTabIntoView();
 });
 
-watch(selectedId, (nextConnectionId, previousConnectionId) => {
-  if (previousConnectionId) {
-    saveTableTabState(previousConnectionId, {
-      tabs: openTableTabs.value,
-      active: selectedTableName.value,
-      pinned: pinnedTableTabs.value,
-    });
-  }
-  const state = loadTableTabState(nextConnectionId);
-  connectionId.value = nextConnectionId;
-  hasSavedTableTabState.value = state.exists;
-  openTableTabs.value = state.tabs;
-  pinnedTableTabs.value = state.pinned;
-  selectedTableName.value = state.active;
-  schema.value = null;
-  tablePage.value = null;
-  drafts.value = {};
-  page.value = 0;
-}, { flush: "sync" });
+watch(
+  selectedId,
+  (nextConnectionId, previousConnectionId) => {
+    if (previousConnectionId) {
+      saveTableTabState(previousConnectionId, {
+        tabs: openTableTabs.value,
+        active: selectedTableName.value,
+        pinned: pinnedTableTabs.value,
+      });
+    }
+    const state = loadTableTabState(nextConnectionId);
+    connectionId.value = nextConnectionId;
+    hasSavedTableTabState.value = state.exists;
+    openTableTabs.value = state.tabs;
+    pinnedTableTabs.value = state.pinned;
+    selectedTableName.value = state.active;
+    schema.value = null;
+    tablePage.value = null;
+    drafts.value = {};
+    page.value = 0;
+  },
+  { flush: "sync" },
+);
 
 watch(pageSize, () => {
   page.value = 0;
@@ -922,7 +1016,10 @@ onUnmounted(() => {
       close
       @update:open="error = ''"
     />
-    <div class="grid min-h-0 min-w-0 flex-1" :style="{ gridTemplateColumns: tableGridTemplateColumns }">
+    <div
+      class="grid min-h-0 min-w-0 flex-1"
+      :style="{ gridTemplateColumns: tableGridTemplateColumns }"
+    >
       <aside class="flex min-h-0 min-w-0 flex-col bg-default/30">
         <div class="shrink-0 p-2">
           <UInput
@@ -940,10 +1037,7 @@ onUnmounted(() => {
           >
             {{ loadingSchema ? "Loading tables..." : "No tables found." }}
           </p>
-          <template
-            v-for="(section, sectionIndex) in tableSections"
-            :key="section.label"
-          >
+          <template v-for="(section, sectionIndex) in tableSections" :key="section.label">
             <button
               type="button"
               class="group sticky z-10 flex h-8 w-full items-center gap-1 bg-default/95 px-3 text-xs font-medium text-muted select-none hover:text-highlighted"
@@ -960,9 +1054,7 @@ onUnmounted(() => {
                 :class="collapsedSections[section.label] ? '-rotate-90' : ''"
               />
               {{ section.label }}
-              <span class="font-normal text-dimmed">
-                ({{ section.items.length }})
-              </span>
+              <span class="font-normal text-dimmed"> ({{ section.items.length }}) </span>
             </button>
             <UTabs
               v-if="!collapsedSections[section.label]"
@@ -975,7 +1067,8 @@ onUnmounted(() => {
               :ui="{
                 list: 'items-start w-full bg-transparent',
                 indicator: 'hidden',
-                trigger: 'min-h-9 w-full rounded-md border border-transparent px-2.5 py-1.5 text-sm font-medium text-muted transition-colors hover:bg-elevated/70 hover:text-highlighted data-[state=active]:border-accented data-[state=active]:bg-accented data-[state=active]:font-semibold data-[state=active]:text-highlighted data-[state=active]:shadow-sm',
+                trigger:
+                  'min-h-9 w-full rounded-md border border-transparent px-2.5 py-1.5 text-sm font-medium text-muted transition-colors hover:bg-elevated/70 hover:text-highlighted data-[state=active]:border-accented data-[state=active]:bg-accented data-[state=active]:font-semibold data-[state=active]:text-highlighted data-[state=active]:shadow-sm',
               }"
             />
           </template>
@@ -1002,303 +1095,355 @@ onUnmounted(() => {
         <span class="pane-resizer-glow pointer-events-none absolute inset-y-0" />
       </div>
 
-      <section
-        v-if="!canAccess"
-        class="min-h-0 min-w-0 bg-default/30"
-      >
+      <section v-if="!canAccess" class="min-h-0 min-w-0 bg-default/30">
         <ConnectionEmptyState />
       </section>
 
-      <section
-        v-else
-        class="min-h-0 min-w-0 flex flex-col bg-default/30"
-      >
-        <div v-if="openTableTabs.length" ref="tableTabsBar" class="relative flex min-h-12 shrink-0 items-center justify-between gap-2 overflow-hidden border-b border-default bg-elevated/40 px-1" @scroll.capture="measureTableTabOverflow">
+      <section v-else class="min-h-0 min-w-0 flex flex-col bg-default/30">
+        <div
+          v-if="openTableTabs.length"
+          ref="tableTabsBar"
+          class="relative flex min-h-12 shrink-0 items-center justify-between gap-2 overflow-hidden border-b border-default bg-elevated/40 px-1"
+          @scroll.capture="measureTableTabOverflow"
+        >
           <UContextMenu :items="tableContextMenuItems" :disabled="!contextTableTab">
-          <div class="min-w-0 flex-1 overflow-hidden" @contextmenu.capture="setContextTableTab" @pointerdown.capture="startTableTabPointerDrag" @click.capture="suppressTableTabClickAfterDrag" @wheel="scrollTableTabsHorizontally">
-          <UTabs
-            v-if="openTableTabs.length"
-            v-model="selectedTableName"
-            :items="openTableTabs.map((name) => ({ label: name, value: name, icon: 'i-lucide-table', pinned: pinnedTableTabs.includes(name), ui: { trigger: draggedTableTab?.name === name && draggedTableTab.dragging ? 'pointer-events-none opacity-35' : '' } }))"
-            :content="false"
-            size="lg"
-            variant="pill"
-            class="min-w-0 overflow-hidden"
-            @mousedown.middle.stop.prevent="closeTableTabFromMiddleClick"
-            :ui="{
-              root: 'min-w-0 overflow-hidden',
-              list: 'tab-scroll-list min-w-0 flex-nowrap gap-1 overflow-x-auto overflow-y-hidden bg-transparent py-1',
-              indicator: 'hidden',
-              trigger: 'min-h-10 flex-none w-fit cursor-grab rounded-lg border border-transparent px-3 py-2 text-sm font-medium focus-visible:outline-none active:cursor-grabbing data-[state=active]:border-accented data-[state=active]:bg-accented data-[state=active]:font-semibold data-[state=active]:text-highlighted data-[state=active]:shadow-sm',
-              label: 'max-w-56 truncate',
-            }"
-          >
-            <template #trailing="{ item }">
-              <span
-                role="button"
-                tabindex="0"
-                class="ml-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-elevated hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary"
-                :class="pendingEditCount && !item.pinned ? 'pointer-events-none opacity-40' : ''"
-                :aria-label="item.pinned ? 'Unpin ' + item.label + ' tab' : 'Close ' + item.label + ' tab'"
-                :title="item.pinned ? 'Click to unpin tab' : pendingEditCount ? 'Save or discard pending edits before closing a tab' : 'Close ' + item.label"
-                @click.stop.prevent="activateTableTabClose(String(item.value))"
-                @keydown.enter.stop.prevent="activateTableTabClose(String(item.value))"
-                @keydown.space.stop.prevent="activateTableTabClose(String(item.value))"
+            <div
+              class="min-w-0 flex-1 overflow-hidden"
+              @contextmenu.capture="setContextTableTab"
+              @pointerdown.capture="startTableTabPointerDrag"
+              @click.capture="suppressTableTabClickAfterDrag"
+              @wheel="scrollTableTabsHorizontally"
+            >
+              <UTabs
+                v-if="openTableTabs.length"
+                v-model="selectedTableName"
+                :items="
+                  openTableTabs.map((name) => ({
+                    label: name,
+                    value: name,
+                    icon: 'i-lucide-table',
+                    pinned: pinnedTableTabs.includes(name),
+                    ui: {
+                      trigger:
+                        draggedTableTab?.name === name && draggedTableTab.dragging
+                          ? 'pointer-events-none opacity-35'
+                          : '',
+                    },
+                  }))
+                "
+                :content="false"
+                size="lg"
+                variant="pill"
+                class="min-w-0 overflow-hidden"
+                @mousedown.middle.stop.prevent="closeTableTabFromMiddleClick"
+                :ui="{
+                  root: 'min-w-0 overflow-hidden',
+                  list: 'tab-scroll-list min-w-0 flex-nowrap gap-1 overflow-x-auto overflow-y-hidden bg-transparent py-1',
+                  indicator: 'hidden',
+                  trigger:
+                    'min-h-10 flex-none w-fit cursor-grab rounded-lg border border-transparent px-3 py-2 text-sm font-medium focus-visible:outline-none active:cursor-grabbing data-[state=active]:border-accented data-[state=active]:bg-accented data-[state=active]:font-semibold data-[state=active]:text-highlighted data-[state=active]:shadow-sm',
+                  label: 'max-w-56 truncate',
+                }"
               >
-                <UIcon :name="item.pinned ? 'i-lucide-pin' : 'i-lucide-x'" class="size-4" />
-              </span>
-            </template>
-          </UTabs>
-          </div>
+                <template #trailing="{ item }">
+                  <span
+                    role="button"
+                    tabindex="0"
+                    class="ml-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-elevated hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary"
+                    :class="
+                      pendingEditCount && !item.pinned ? 'pointer-events-none opacity-40' : ''
+                    "
+                    :aria-label="
+                      item.pinned ? 'Unpin ' + item.label + ' tab' : 'Close ' + item.label + ' tab'
+                    "
+                    :title="
+                      item.pinned
+                        ? 'Click to unpin tab'
+                        : pendingEditCount
+                          ? 'Save or discard pending edits before closing a tab'
+                          : 'Close ' + item.label
+                    "
+                    @click.stop.prevent="activateTableTabClose(String(item.value))"
+                    @keydown.enter.stop.prevent="activateTableTabClose(String(item.value))"
+                    @keydown.space.stop.prevent="activateTableTabClose(String(item.value))"
+                  >
+                    <UIcon :name="item.pinned ? 'i-lucide-pin' : 'i-lucide-x'" class="size-4" />
+                  </span>
+                </template>
+              </UTabs>
+            </div>
           </UContextMenu>
-          <div v-if="hasMoreTableTabsLeft" class="pointer-events-none absolute inset-y-0 left-0 z-10 w-12 bg-gradient-to-r from-elevated via-elevated/95 to-transparent" />
-          <div v-if="hasMoreTableTabsRight" class="pointer-events-none absolute inset-y-0 right-0 z-10 w-12 bg-gradient-to-l from-elevated via-elevated/95 to-transparent" />
+          <div
+            v-if="hasMoreTableTabsLeft"
+            class="pointer-events-none absolute inset-y-0 left-0 z-10 w-12 bg-gradient-to-r from-elevated via-elevated/95 to-transparent"
+          />
+          <div
+            v-if="hasMoreTableTabsRight"
+            class="pointer-events-none absolute inset-y-0 right-0 z-10 w-12 bg-gradient-to-l from-elevated via-elevated/95 to-transparent"
+          />
         </div>
         <template v-if="selectedTableName">
-        <div
-          class="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b border-default p-2"
-        >
-          <!-- basis-40 lets the controls share this line until the info would be
-               squeezed below 10rem; until then a long reducer name truncates. -->
-          <div class="flex min-w-0 flex-1 basis-40 items-center gap-2 px-1 text-xs text-muted">
-            <UBadge
-              v-if="selectedTable?.scheduledReducer"
-              color="neutral"
-              variant="subtle"
-              icon="i-lucide-timer"
-              size="sm"
-              class="min-w-0"
-              :title="`Rows in this table schedule calls to ${selectedTable.scheduledReducer}`"
-            >
-              <span class="truncate">
-                Schedules <span class="font-mono">{{ selectedTable.scheduledReducer }}</span>
-              </span>
-            </UBadge>
-            <span v-if="tablePage" class="shrink-0 whitespace-nowrap">{{ rangeLabel }}</span>
-            <UBadge v-if="readOnly" color="neutral" variant="subtle" icon="i-lucide-lock" size="sm" class="shrink-0">
-              Read-only
-            </UBadge>
-          </div>
-          <!-- ml-auto keeps the controls right-aligned when the toolbar wraps. -->
-          <form
-            class="ml-auto flex flex-wrap items-center gap-2"
-            @submit.prevent="submitWhere"
+          <div
+            class="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b border-default p-2"
           >
-            <UFieldGroup>
-              <UInput
-                v-model="whereSql"
-                placeholder="WHERE"
-                class="w-32 sm:w-48"
-                aria-label="WHERE query"
-                :disabled="pendingEditCount > 0"
-              />
-              <UTooltip text="Apply filter">
-                <UButton
-                  icon="i-lucide-search"
-                  color="neutral"
-                  variant="soft"
-                  type="submit"
-                  :loading="loadingRows"
+            <!-- basis-40 lets the controls share this line until the info would be
+               squeezed below 10rem; until then a long reducer name truncates. -->
+            <div class="flex min-w-0 flex-1 basis-40 items-center gap-2 px-1 text-xs text-muted">
+              <UBadge
+                v-if="selectedTable?.scheduledReducer"
+                color="neutral"
+                variant="subtle"
+                icon="i-lucide-timer"
+                size="sm"
+                class="min-w-0"
+                :title="`Rows in this table schedule calls to ${selectedTable.scheduledReducer}`"
+              >
+                <span class="truncate">
+                  Schedules <span class="font-mono">{{ selectedTable.scheduledReducer }}</span>
+                </span>
+              </UBadge>
+              <span v-if="tablePage" class="shrink-0 whitespace-nowrap">{{ rangeLabel }}</span>
+              <UBadge
+                v-if="readOnly"
+                color="neutral"
+                variant="subtle"
+                icon="i-lucide-lock"
+                size="sm"
+                class="shrink-0"
+              >
+                Read-only
+              </UBadge>
+            </div>
+            <!-- ml-auto keeps the controls right-aligned when the toolbar wraps. -->
+            <form class="ml-auto flex flex-wrap items-center gap-2" @submit.prevent="submitWhere">
+              <UFieldGroup>
+                <UInput
+                  v-model="whereSql"
+                  placeholder="WHERE"
+                  class="w-32 sm:w-48"
+                  aria-label="WHERE query"
                   :disabled="pendingEditCount > 0"
-                  aria-label="Apply filter"
                 />
-              </UTooltip>
-            </UFieldGroup>
-            <UTooltip text="Rows per page">
-              <USelect
-                v-model="pageSize"
-                :items="[10, 25, 50, 100]"
-                class="w-24"
-                aria-label="Page size"
-                :disabled="pendingEditCount > 0"
-              />
-            </UTooltip>
-            <UTooltip text="Previous page">
-              <UButton
-                icon="i-lucide-chevron-left"
-                color="neutral"
-                variant="soft"
-                type="button"
-                :disabled="page === 0 || pendingEditCount > 0"
-                aria-label="Previous page"
-                @click="goToPage(page - 1)"
-              />
-            </UTooltip>
-            <UTooltip text="Next page">
-              <UButton
-                icon="i-lucide-chevron-right"
-                color="neutral"
-                variant="soft"
-                type="button"
-                :disabled="!tablePage?.hasMore || pendingEditCount > 0"
-                aria-label="Next page"
-                @click="goToPage(page + 1)"
-              />
-            </UTooltip>
-            <UTooltip text="Export as CSV or JSON">
-              <span class="inline-flex">
-                <UDropdownMenu :items="exportItems">
+                <UTooltip text="Apply filter">
                   <UButton
-                    icon="i-lucide-download"
+                    icon="i-lucide-search"
                     color="neutral"
                     variant="soft"
-                    type="button"
-                    :loading="exporting"
-                    :disabled="!selectedTableName"
-                    aria-label="Export rows"
+                    type="submit"
+                    :loading="loadingRows"
+                    :disabled="pendingEditCount > 0"
+                    aria-label="Apply filter"
                   />
-                </UDropdownMenu>
-              </span>
-            </UTooltip>
-            <UTooltip v-if="!readOnly" text="New row">
-              <UButton
-                icon="i-lucide-plus"
-                type="button"
-                :disabled="!selectedTable || pendingEditCount > 0"
-                @click="newRow"
-              >New Row</UButton>
-            </UTooltip>
-          </form>
-        </div>
-
-        <UAlert
-          v-if="tablePage?.scanLimit"
-          color="warning"
-          variant="subtle"
-          icon="i-lucide-triangle-alert"
-          :description="`Paging stops after the first ${tablePage.scanLimit.toLocaleString()} rows. Add a WHERE filter to narrow the table.`"
-          class="m-2 shrink-0"
-        />
-
-        <div class="relative flex min-h-0 flex-1 flex-col">
-          <UTable
-            :data="tablePage?.rows ?? []"
-            :columns="rowColumns"
-            :loading="loadingRows"
-            sticky="header"
-            :column-pinning="{ right: ['actions'] }"
-            class="min-h-0 flex-1"
-            :ui="{
-              ...dataTableUi,
-              tbody: pendingEditCount
-                ? `${dataTableUi.tbody} after:table-row after:h-28 after:content-['']`
-                : dataTableUi.tbody,
-              empty: loadingRows ? 'hidden' : dataTableUi.empty,
-            }"
-          >
-          <template
-            v-for="column in pageColumns"
-            :key="column.name"
-            #[`${column.name}-header`]
-          >
-            <span class="inline-flex items-center gap-1">
-              <UIcon
-                v-if="selectedTable?.primaryKey.includes(column.name)"
-                name="i-lucide-key-round"
-                class="size-3 text-warning"
-                title="Primary key"
-              />
-              {{ column.name }}
-              <span class="font-normal">({{ column.type }})</span>
-            </span>
-          </template>
-
-          <template
-            v-for="column in pageColumns"
-            :key="column.name"
-            #[`${column.name}-cell`]="{ row }"
-          >
-            <div :tabindex="0" :class="selectedCellUi">
-              <template v-if="isEditable(column) && !readOnly">
-                <UCheckbox
-                  v-if="column.kind === 'bool'"
-                  :disabled="savingRow"
-                  :model-value="draftText(row.index, row.original, column) === 'true'"
-                  @update:model-value="setDraft(row.index, row.original, column, String($event === true))"
+                </UTooltip>
+              </UFieldGroup>
+              <UTooltip text="Rows per page">
+                <USelect
+                  v-model="pageSize"
+                  :items="[10, 25, 50, 100]"
+                  class="w-24"
+                  aria-label="Page size"
+                  :disabled="pendingEditCount > 0"
                 />
-                <input
-                  v-else
-                  class="absolute inset-0 h-full w-full border-0 bg-transparent px-3 py-2 text-inherit outline-none ring-0 focus:border-0 focus:bg-transparent focus:ring-0"
-                  :class="isDirty(row.index, column.name) ? 'bg-warning/5' : ''"
-                  :value="draftText(row.index, row.original, column)"
-                  :disabled="savingRow"
-                  @input="setDraft(row.index, row.original, column, ($event.target as HTMLInputElement).value)"
+              </UTooltip>
+              <UTooltip text="Previous page">
+                <UButton
+                  icon="i-lucide-chevron-left"
+                  color="neutral"
+                  variant="soft"
+                  type="button"
+                  :disabled="page === 0 || pendingEditCount > 0"
+                  aria-label="Previous page"
+                  @click="goToPage(page - 1)"
                 />
-              </template>
-              <span
-                v-else
-                class="block max-w-md truncate text-highlighted"
-                :title="formatCell(row.original[column.name], column.kind)"
-              >
-                {{ formatCell(row.original[column.name], column.kind) }}
-              </span>
-            </div>
-          </template>
-
-          <template #actions-cell="{ row }">
-            <UTooltip :text="readOnly ? 'View row' : 'Edit row'">
-              <UButton
-                :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-file-pen-line'"
-                size="xs"
-                color="neutral"
-                variant="ghost"
-                :aria-label="readOnly ? 'View row' : 'Edit row'"
-                :disabled="pendingEditCount > 0"
-                @click="editRow(row.original)"
-              />
-            </UTooltip>
-            <UTooltip v-if="!readOnly" text="Delete row">
-              <UButton
-                icon="i-lucide-trash-2"
-                size="xs"
-                color="error"
-                variant="ghost"
-                aria-label="Delete row"
-                :disabled="pendingEditCount > 0"
-                @click="pendingDelete = row.original"
-              />
-            </UTooltip>
-          </template>
-
-          <template #empty>
-            {{ activeWhereSql ? "No rows match this filter." : "This table is empty." }}
-          </template>
-          </UTable>
-
-          <div
-            v-if="pendingEditCount && !readOnly"
-            role="status"
-            aria-live="polite"
-            :class="[showcaseMode ? '' : 'absolute bottom-4 left-1/2 z-20', 'flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-3 whitespace-nowrap rounded-full border border-default/80 bg-default/85 px-4 py-2 shadow-xl backdrop-blur-xl']"
-            :style="showcaseMode ? { position: 'fixed', bottom: '24px', left: 'calc(50% + 222px)', zIndex: 1000 } : undefined"
-          >
-            <span class="text-sm font-medium text-highlighted">
-              {{ pendingEditCount }} {{ pendingEditCount === 1 ? "edit" : "edits" }}
-            </span>
-            <span class="h-5 w-px bg-default" aria-hidden="true" />
-            <UTooltip text="Undo edits">
-              <UButton
-                color="neutral"
-                variant="ghost"
-                size="sm"
-                :disabled="savingRow"
-                @click="undoPendingEdits"
-              >
-                Undo
-              </UButton>
-            </UTooltip>
-            <UTooltip text="Save edits">
-              <UButton
-                icon="i-lucide-save"
-                size="sm"
-                :loading="savingRow"
-                @click="savePendingEdits"
-              >
-                Save changes
-              </UButton>
-            </UTooltip>
+              </UTooltip>
+              <UTooltip text="Next page">
+                <UButton
+                  icon="i-lucide-chevron-right"
+                  color="neutral"
+                  variant="soft"
+                  type="button"
+                  :disabled="!tablePage?.hasMore || pendingEditCount > 0"
+                  aria-label="Next page"
+                  @click="goToPage(page + 1)"
+                />
+              </UTooltip>
+              <UTooltip text="Export as CSV or JSON">
+                <span class="inline-flex">
+                  <UDropdownMenu :items="exportItems">
+                    <UButton
+                      icon="i-lucide-download"
+                      color="neutral"
+                      variant="soft"
+                      type="button"
+                      :loading="exporting"
+                      :disabled="!selectedTableName"
+                      aria-label="Export rows"
+                    />
+                  </UDropdownMenu>
+                </span>
+              </UTooltip>
+              <UTooltip v-if="!readOnly" text="New row">
+                <UButton
+                  icon="i-lucide-plus"
+                  type="button"
+                  :disabled="!selectedTable || pendingEditCount > 0"
+                  @click="newRow"
+                  >New Row</UButton
+                >
+              </UTooltip>
+            </form>
           </div>
-        </div>
+
+          <UAlert
+            v-if="tablePage?.scanLimit"
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-triangle-alert"
+            :description="`Paging stops after the first ${tablePage.scanLimit.toLocaleString()} rows. Add a WHERE filter to narrow the table.`"
+            class="m-2 shrink-0"
+          />
+
+          <div class="relative flex min-h-0 flex-1 flex-col">
+            <UTable
+              :data="tablePage?.rows ?? []"
+              :columns="rowColumns"
+              :loading="loadingRows"
+              sticky="header"
+              :column-pinning="{ right: ['actions'] }"
+              class="min-h-0 flex-1"
+              :ui="{
+                ...dataTableUi,
+                tbody: pendingEditCount
+                  ? `${dataTableUi.tbody} after:table-row after:h-28 after:content-['']`
+                  : dataTableUi.tbody,
+                empty: loadingRows ? 'hidden' : dataTableUi.empty,
+              }"
+            >
+              <template v-for="column in pageColumns" :key="column.name" #[`${column.name}-header`]>
+                <span class="inline-flex items-center gap-1">
+                  <UIcon
+                    v-if="selectedTable?.primaryKey.includes(column.name)"
+                    name="i-lucide-key-round"
+                    class="size-3 text-warning"
+                    title="Primary key"
+                  />
+                  {{ column.name }}
+                  <span class="font-normal">({{ column.type }})</span>
+                </span>
+              </template>
+
+              <template
+                v-for="column in pageColumns"
+                :key="column.name"
+                #[`${column.name}-cell`]="{ row }"
+              >
+                <div :tabindex="0" :class="selectedCellUi">
+                  <template v-if="isEditable(column) && !readOnly">
+                    <UCheckbox
+                      v-if="column.kind === 'bool'"
+                      :disabled="savingRow"
+                      :model-value="draftText(row.index, row.original, column) === 'true'"
+                      @update:model-value="
+                        setDraft(row.index, row.original, column, String($event === true))
+                      "
+                    />
+                    <input
+                      v-else
+                      class="absolute inset-0 h-full w-full border-0 bg-transparent px-3 py-2 text-inherit outline-none ring-0 focus:border-0 focus:bg-transparent focus:ring-0"
+                      :class="isDirty(row.index, column.name) ? 'bg-warning/5' : ''"
+                      :value="draftText(row.index, row.original, column)"
+                      :disabled="savingRow"
+                      @input="
+                        setDraft(
+                          row.index,
+                          row.original,
+                          column,
+                          ($event.target as HTMLInputElement).value,
+                        )
+                      "
+                    />
+                  </template>
+                  <span
+                    v-else
+                    class="block max-w-md truncate text-highlighted"
+                    :title="formatCell(row.original[column.name], column.kind)"
+                  >
+                    {{ formatCell(row.original[column.name], column.kind) }}
+                  </span>
+                </div>
+              </template>
+
+              <template #actions-cell="{ row }">
+                <UTooltip :text="readOnly ? 'View row' : 'Edit row'">
+                  <UButton
+                    :icon="readOnly ? 'i-lucide-eye' : 'i-lucide-file-pen-line'"
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    :aria-label="readOnly ? 'View row' : 'Edit row'"
+                    :disabled="pendingEditCount > 0"
+                    @click="editRow(row.original)"
+                  />
+                </UTooltip>
+                <UTooltip v-if="!readOnly" text="Delete row">
+                  <UButton
+                    icon="i-lucide-trash-2"
+                    size="xs"
+                    color="error"
+                    variant="ghost"
+                    aria-label="Delete row"
+                    :disabled="pendingEditCount > 0"
+                    @click="pendingDelete = row.original"
+                  />
+                </UTooltip>
+              </template>
+
+              <template #empty>
+                {{ activeWhereSql ? "No rows match this filter." : "This table is empty." }}
+              </template>
+            </UTable>
+
+            <div
+              v-if="pendingEditCount && !readOnly"
+              role="status"
+              aria-live="polite"
+              :class="[
+                showcaseMode ? '' : 'absolute bottom-4 left-1/2 z-20',
+                'flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-3 whitespace-nowrap rounded-full border border-default/80 bg-default/85 px-4 py-2 shadow-xl backdrop-blur-xl',
+              ]"
+              :style="
+                showcaseMode
+                  ? { position: 'fixed', bottom: '24px', left: 'calc(50% + 222px)', zIndex: 1000 }
+                  : undefined
+              "
+            >
+              <span class="text-sm font-medium text-highlighted">
+                {{ pendingEditCount }} {{ pendingEditCount === 1 ? "edit" : "edits" }}
+              </span>
+              <span class="h-5 w-px bg-default" aria-hidden="true" />
+              <UTooltip text="Undo edits">
+                <UButton
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
+                  :disabled="savingRow"
+                  @click="undoPendingEdits"
+                >
+                  Undo
+                </UButton>
+              </UTooltip>
+              <UTooltip text="Save edits">
+                <UButton
+                  icon="i-lucide-save"
+                  size="sm"
+                  :loading="savingRow"
+                  @click="savePendingEdits"
+                >
+                  Save changes
+                </UButton>
+              </UTooltip>
+            </div>
+          </div>
         </template>
       </section>
     </div>
@@ -1326,18 +1471,17 @@ onUnmounted(() => {
       }"
     >
       <template #body>
-        <UForm
-          id="row-editor-form"
-          :state="rowForm"
-          class="space-y-4"
-          @submit="saveRow"
-        >
+        <UForm id="row-editor-form" :state="rowForm" class="space-y-4" @submit="saveRow">
           <UFormField
             v-for="column in originalRow ? pageColumns : (selectedTable?.columns ?? [])"
             :key="column.name"
             :label="column.name"
             :hint="column.type"
-            :help="!isEditable(column) && !readOnly ? 'This type can\'t be written with SQL. Use a reducer to change it.' : undefined"
+            :help="
+              !isEditable(column) && !readOnly
+                ? 'This type can\'t be written with SQL. Use a reducer to change it.'
+                : undefined
+            "
           >
             <UCheckbox
               v-if="column.kind === 'bool'"
@@ -1357,7 +1501,9 @@ onUnmounted(() => {
               v-else
               :model-value="getTextField(column.name)"
               class="w-full"
-              :inputmode="column.kind === 'integer' || column.kind === 'float' ? 'decimal' : undefined"
+              :inputmode="
+                column.kind === 'integer' || column.kind === 'float' ? 'decimal' : undefined
+              "
               :placeholder="column.kind === 'identity' ? '0x…' : undefined"
               :disabled="readOnly"
               @update:model-value="setTextField(column.name, $event)"
@@ -1368,9 +1514,9 @@ onUnmounted(() => {
 
       <template #footer="{ close }">
         <div class="flex w-full justify-end gap-2">
-          <UButton color="neutral" variant="soft" @click="close"
-            >{{ readOnly ? "Close" : "Cancel" }}</UButton
-          >
+          <UButton color="neutral" variant="soft" @click="close">{{
+            readOnly ? "Close" : "Cancel"
+          }}</UButton>
           <UButton
             v-if="!readOnly"
             icon="i-lucide-save"
@@ -1393,11 +1539,19 @@ onUnmounted(() => {
       <template #body>
         <pre
           class="max-h-60 overflow-auto rounded-md border border-default bg-default/40 p-3 text-xs text-highlighted"
-        >{{ JSON.stringify(pendingDelete, null, 2) }}</pre>
+          >{{ JSON.stringify(pendingDelete, null, 2) }}</pre>
       </template>
       <template #footer>
         <div class="flex w-full justify-end gap-2">
-          <UButton color="neutral" variant="soft" @click="() => { pendingDelete = null }">
+          <UButton
+            color="neutral"
+            variant="soft"
+            @click="
+              () => {
+                pendingDelete = null;
+              }
+            "
+          >
             Cancel
           </UButton>
           <UButton color="error" :loading="savingRow" @click="confirmDelete">Delete</UButton>

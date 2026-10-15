@@ -177,11 +177,7 @@ export function executeSql(connectionId: string, sql: string) {
   return invoke<SqlResult>("execute_sql", { connectionId, sql });
 }
 
-export function runFunction(
-  connectionId: string,
-  functionName: string,
-  args: unknown[],
-) {
+export function runFunction(connectionId: string, functionName: string, args: unknown[]) {
   return invoke<unknown>("run_function", {
     connectionId,
     functionName,
@@ -195,12 +191,7 @@ export function createRow(connectionId: string, tableName: string, row: Row) {
 
 // `changes` holds only the columns to set. The backend identifies the row from
 // `originalRow` and refuses to write unless exactly one row matches.
-export function updateRow(
-  connectionId: string,
-  tableName: string,
-  originalRow: Row,
-  changes: Row,
-) {
+export function updateRow(connectionId: string, tableName: string, originalRow: Row, changes: Row) {
   return invoke<void>("update_row", {
     connectionId,
     tableName,

@@ -4,15 +4,8 @@ import type { NavigationMenuItem } from "@nuxt/ui";
 import { useRoute, useRouter } from "vue-router";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
-import {
-  availableUpdate,
-  checkForUpdate,
-} from "./lib/updateStore";
-import {
-  pageRefreshHandler,
-  pageRefreshLoading,
-  runPageRefresh,
-} from "./lib/pageActions";
+import { availableUpdate, checkForUpdate } from "./lib/updateStore";
+import { pageRefreshHandler, pageRefreshLoading, runPageRefresh } from "./lib/pageActions";
 import { useConnections } from "./lib/connectionStore";
 import { connectionIndependentPages, pageNavigationLoadingPath } from "./router";
 import ConnectionPicker from "./components/ConnectionPicker.vue";
@@ -42,7 +35,9 @@ async function installUpdate() {
       await updateToInstall.close();
       const refreshedUpdate = await check();
       if (!refreshedUpdate) {
-        throw new Error("No update is currently available. Restart the app to check its installed version.");
+        throw new Error(
+          "No update is currently available. Restart the app to check its installed version.",
+        );
       }
       updateToInstall = refreshedUpdate;
       availableUpdate.value = refreshedUpdate;
@@ -54,9 +49,8 @@ async function installUpdate() {
         updateProgress.value = 0;
       } else if (event.event === "Progress") {
         downloaded += event.data.chunkLength;
-        updateProgress.value = contentLength > 0
-          ? Math.min(100, Math.round((downloaded / contentLength) * 100))
-          : null;
+        updateProgress.value =
+          contentLength > 0 ? Math.min(100, Math.round((downloaded / contentLength) * 100)) : null;
       } else if (event.event === "Finished") {
         updateProgress.value = 100;
       }
@@ -109,8 +103,7 @@ onUnmounted(() => {
 const pageHeaders: Record<string, { title: string; description: string }> = {
   "/tables": {
     title: "Tables",
-    description:
-      "Browse schema, page through rows, and edit table data.",
+    description: "Browse schema, page through rows, and edit table data.",
   },
   "/sql": {
     title: "SQL",
@@ -123,8 +116,7 @@ const pageHeaders: Record<string, { title: string; description: string }> = {
   },
   "/logs": {
     title: "Logs",
-    description:
-      "Owner/admin credentials are required for private database logs.",
+    description: "Owner/admin credentials are required for private database logs.",
   },
   "/settings": {
     title: "Settings",
@@ -246,7 +238,12 @@ function isPageLoading(item: NavigationMenuItem) {
             >
               <span v-if="state !== 'collapsed'">{{ item.label }}</span>
               <template #trailing>
-                <UIcon v-if="pageNavigationLoadingPath === item.to" name="i-lucide-loader-circle" class="size-4 animate-spin" aria-hidden="true" />
+                <UIcon
+                  v-if="pageNavigationLoadingPath === item.to"
+                  name="i-lucide-loader-circle"
+                  class="size-4 animate-spin"
+                  aria-hidden="true"
+                />
               </template>
             </UButton>
             <UButton
@@ -274,8 +271,16 @@ function isPageLoading(item: NavigationMenuItem) {
                 color="primary"
                 variant="subtle"
                 icon="i-lucide-download"
-                :title="updateError ? 'Update failed' : `Update ${availableUpdate.version} available`"
-                :description="updateError ? `The update could not be installed: ${updateError}` : updateProgress !== null ? `Downloading update: ${updateProgress}%` : 'A new version is ready to install.'"
+                :title="
+                  updateError ? 'Update failed' : `Update ${availableUpdate.version} available`
+                "
+                :description="
+                  updateError
+                    ? `The update could not be installed: ${updateError}`
+                    : updateProgress !== null
+                      ? `Downloading update: ${updateProgress}%`
+                      : 'A new version is ready to install.'
+                "
                 :ui="{ root: 'items-start' }"
               >
                 <template #actions>
@@ -288,9 +293,22 @@ function isPageLoading(item: NavigationMenuItem) {
                     :disabled="installingUpdate"
                     @click="installUpdate"
                   >
-                    {{ updateError ? 'Retry update' : updateProgress !== null ? 'Installing' : 'Update now' }}
+                    {{
+                      updateError
+                        ? "Retry update"
+                        : updateProgress !== null
+                          ? "Installing"
+                          : "Update now"
+                    }}
                   </UButton>
-                  <UButton size="xs" color="neutral" variant="ghost" :disabled="installingUpdate" @click="dismissUpdate">Later</UButton>
+                  <UButton
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    :disabled="installingUpdate"
+                    @click="dismissUpdate"
+                    >Later</UButton
+                  >
                 </template>
               </UAlert>
               <UButton

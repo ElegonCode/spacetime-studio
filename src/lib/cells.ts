@@ -47,9 +47,7 @@ export function formatCell(value: unknown, kind: ColumnKind = "other") {
 // Text placed in an edit field. Identical to the display text except that
 // timestamps keep their raw value, since they are not editable anyway.
 export function cellToInput(value: unknown, column: ColumnSummary) {
-  return column.kind === "timestamp"
-    ? JSON.stringify(value ?? "")
-    : formatCell(value, column.kind);
+  return column.kind === "timestamp" ? JSON.stringify(value ?? "") : formatCell(value, column.kind);
 }
 
 // Turns an edit field back into the value sent to the backend. Numbers stay as
