@@ -73,7 +73,7 @@ onUnmounted(() => clearPageRefreshHandler(refresh));
     <div class="mx-auto max-w-5xl space-y-6">
       <div>
         <h1 class="text-lg font-semibold text-highlighted">Local SpacetimeDB installations</h1>
-        <p class="mt-1 text-sm text-muted">Install or uninstall versions, switch the active version, or update to the latest release.</p>
+        <p class="mt-1 text-sm text-muted">Install or uninstall versions, switch the active version, or update to the latest release. Start and stop the local server from the connection picker in the sidebar.</p>
       </div>
 
       <UAlert v-if="installationError" color="error" variant="subtle" title="Could not check the local installation" :description="installationError">
@@ -96,7 +96,7 @@ onUnmounted(() => clearPageRefreshHandler(refresh));
                 <UBadge v-else-if="latestStable" color="primary" variant="subtle">{{ latestStable.version }} available</UBadge>
               </div>
             </div>
-            <UButton icon="i-lucide-download" :disabled="!canManage || !updateAvailable" :loading="versionOperation?.action === 'upgrade'" @click="runVersionOperation('upgrade')">Update to latest</UButton>
+            <UButton v-if="updateAvailable || versionOperation?.action === 'upgrade'" icon="i-lucide-download" :disabled="!canManage || !updateAvailable" :loading="versionOperation?.action === 'upgrade'" @click="runVersionOperation('upgrade')">Update to latest</UButton>
           </div>
           <p class="mt-4 break-all font-mono text-xs text-muted">{{ localInstallations.cliPath }}</p>
           <p class="mt-3 text-sm text-muted">The active version is used by the CLI and new local server launches. Restart an already running server after switching versions.</p>

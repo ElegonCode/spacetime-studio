@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref, watch, watchEffect } from "vue";
 import { useToast } from "@nuxt/ui/composables";
 import { deleteConnection, type ConnectionProfile } from "../lib/spacetime";
 import { useConnections, type Reachability } from "../lib/connectionStore";
 import { editorOpen, editorTarget, openConnectionEditor } from "../lib/connectionUi";
 import { hostLabel } from "../lib/hosts";
+import { serverAction, serverOutputOpen, serverStatus, setServerPolling } from "../lib/localServerStore";
 import ConnectionEditor from "./ConnectionEditor.vue";
+import LocalServerControl from "./LocalServerControl.vue";
 
 // The sidebar's connection switcher and manager in one: pick the active
 // profile, see which servers are reachable, and add, edit, or remove profiles.
@@ -37,6 +39,22 @@ const pinging = computed(() =>
 // what is actually reachable right now.
 watch(open, (isOpen) => {
   if (isOpen) pingAll();
+});
+
+const serverState = computed(() => serverStatus.value?.state ?? "stopped");
+const serverRunning = computed(() => serverState.value === "running");
+
+// Check often while the picker is open or the server is coming up, and slowly
+// while it runs so a crash still shows in the sidebar.
+watchEffect(() => {
+  if (open.value || serverState.value === "starting" || serverAction.value) setServerPolling(1500);
+  else if (serverRunning.value) setServerPolling(10_000);
+  else setServerPolling(null);
+});
+
+// Local connections go online or offline with the server, so re-check them.
+watch(serverState, (next, previous) => {
+  if (previous && next !== previous && (next === "running" || next === "stopped")) pingAll();
 });
 
 type Badge = { label: string; dot: string; text: string };
@@ -155,6 +173,12 @@ async function confirmDelete() {
           }}
         </span>
       </span>
+      <UIcon
+        v-if="serverRunning"
+        name="i-lucide-power"
+        class="size-3.5 shrink-0 text-green-400"
+        :title="`Local server running at ${serverStatus?.url}`"
+      />
       <UIcon name="i-lucide-chevrons-up-down" class="size-4 shrink-0 text-dimmed" />
     </UButton>
     <UButton
@@ -274,6 +298,8 @@ async function confirmDelete() {
           </li>
         </ul>
 
+        <LocalServerControl @close="open = false" />
+
         <div class="border-t border-default p-1.5">
           <UButton
             icon="i-lucide-plus"
@@ -291,6 +317,19 @@ async function confirmDelete() {
   </UPopover>
 
   <ConnectionEditor v-model:open="editorOpen" :connection="editorTarget" />
+
+  <UModal
+    v-model:open="serverOutputOpen"
+    title="Local server output"
+    :description="serverStatus?.exitMessage ?? 'The most recent output from the local SpacetimeDB server.'"
+    :ui="{ content: 'sm:max-w-3xl' }"
+  >
+    <template #body>
+      <pre
+        class="max-h-[60vh] overflow-auto text-xs break-words whitespace-pre-wrap text-muted"
+      >{{ serverStatus?.output.length ? serverStatus.output.join("\n") : "No output yet." }}</pre>
+    </template>
+  </UModal>
 
   <UModal
     :open="pendingDelete !== null"

@@ -128,6 +128,17 @@ export function deleteConnection(connectionId: string) {
   return invoke<void>("delete_connection", { connectionId });
 }
 
+// Studio uses one connection at a time. Switching ends the previous one's log
+// streams and pending reads, and the backend refuses requests to any other.
+export function setActiveConnection(connectionId: string | null) {
+  return invoke<void>("set_active_connection", { connectionId });
+}
+
+// A read abandoned because the user switched connections; not worth showing.
+export function isSwitchedAway(error: unknown) {
+  return String(error).startsWith("Disconnected: another connection is now active.");
+}
+
 export function testConnection(input: {
   id?: string;
   baseUrl?: string;

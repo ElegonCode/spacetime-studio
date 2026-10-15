@@ -9,7 +9,7 @@ use std::{
 use tokio::{process::Command, sync::Mutex};
 
 #[derive(Default)]
-pub struct InstallationState(Mutex<()>);
+pub struct InstallationState(pub(crate) Mutex<()>);
 
 fn http_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
@@ -50,7 +50,7 @@ pub struct LocalInstallations {
     management_error: Option<String>,
 }
 
-fn find_cli() -> Option<PathBuf> {
+pub(crate) fn find_cli() -> Option<PathBuf> {
     let name = if cfg!(windows) {
         "spacetime.exe"
     } else {

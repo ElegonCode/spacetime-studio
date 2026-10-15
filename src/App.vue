@@ -117,9 +117,9 @@ const pageHeaders: Record<string, { title: string; description: string }> = {
     description: "Run SQL against the database and export the results.",
   },
   "/functions": {
-    title: "Functions",
+    title: "Reducers",
     description:
-      "Reducers, procedures, and lifecycle functions from the schema.",
+      "Call the database's reducers. Lifecycle reducers are listed but run by SpacetimeDB.",
   },
   "/logs": {
     title: "Logs",
@@ -162,7 +162,7 @@ const baseItems: NavigationMenuItem[] = [
     slot: "page",
   },
   {
-    label: "Functions",
+    label: "Reducers",
     icon: "i-lucide-square-function",
     to: "/functions",
     slot: "page",

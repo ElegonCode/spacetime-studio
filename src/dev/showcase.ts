@@ -122,13 +122,80 @@ if (showcaseEnabled) {
     });
   }
 
-  const schema = { raw: {}, tables, reducers: ["create_player", "equip_item", "complete_quest", "start_world_event"].map((name) => ({ name, lifecycle: null, scheduledBy: null, params: [] })) };
-  const connections = [{ id: connectionId, name: "Astral Realms", baseUrl: "http://127.0.0.1:3000", database: "studio-showcase", identity: null, hasToken: false, readOnly: false, createdAt: Date.now(), updatedAt: Date.now() }];
+  const param = (name: string, type: string, kind: string) => ({ name, type, kind });
+  const reducers = [
+    { name: "init", lifecycle: "Init", scheduledBy: null, params: [] },
+    { name: "client_connected", lifecycle: "OnConnect", scheduledBy: null, params: [] },
+    { name: "create_player", lifecycle: null, scheduledBy: null, params: [param("username", "String", "string"), param("class", "String", "string")] },
+    { name: "equip_item", lifecycle: null, scheduledBy: null, params: [param("player_id", "U64", "integer"), param("item_id", "U64", "integer")] },
+    { name: "complete_quest", lifecycle: null, scheduledBy: null, params: [param("player_id", "U64", "integer"), param("quest_id", "U64", "integer")] },
+    { name: "grant_gold", lifecycle: null, scheduledBy: null, params: [param("player_id", "U64", "integer"), param("amount", "U32", "integer")] },
+    { name: "start_world_event", lifecycle: null, scheduledBy: null, params: [param("event_id", "U64", "integer")] },
+    { name: "tick_world_events", lifecycle: null, scheduledBy: "world_event_timer", params: [] },
+  ];
+  const schema = { raw: {}, tables, reducers };
+  const now = Date.now();
+  const connections = [
+    { id: connectionId, name: "Astral Realms", baseUrl: "http://127.0.0.1:3000", database: "studio-showcase", identity: null, hasToken: false, readOnly: false, createdAt: now, updatedAt: now },
+    { id: "showcase-prod", name: "Astral Realms · Prod", baseUrl: "https://maincloud.spacetimedb.com", database: "astral-realms", identity: null, hasToken: true, readOnly: true, createdAt: now, updatedAt: now },
+    { id: "showcase-staging", name: "Market Staging", baseUrl: "https://maincloud.spacetimedb.com", database: "night-market-staging", identity: null, hasToken: true, readOnly: false, createdAt: now, updatedAt: now },
+  ];
 
-  const tauriWindow = window as Window & { __TAURI_INTERNALS__?: { invoke?: (command: string, args?: Record<string, unknown>, options?: unknown) => Promise<unknown> } };
+  const leaderboard = (tables[0]!.rows as Record<string, unknown>[]).slice(0, 25)
+    .sort((a, b) => Number(b.level) - Number(a.level)).slice(0, 12);
+  const sqlResult = {
+    statements: [{
+      columns: [param("username", "String", "string"), param("class", "String", "string"), param("level", "U32", "integer"), param("gold", "U64", "integer"), param("online", "Bool", "bool")],
+      rows: leaderboard.map((row) => [row.username, row.class, row.level, row.gold, row.online]),
+      durationMicros: 1840,
+    }],
+  };
+
+  const logLines = [
+    ["INFO", "spacetimedb::host", "Database studio-showcase initialised"],
+    ["INFO", "src/lib.rs:42", "init: seeded 6 guilds and 8 quests"],
+    ["INFO", "src/lib.rs:88", "client_connected: Aeralith joined Moonreach"],
+    ["DEBUG", "src/quests.rs:31", "complete_quest(player_id=8, quest_id=5) → +1880 gold"],
+    ["INFO", "src/events.rs:17", "start_world_event: The Waking Eclipse is now active"],
+    ["WARN", "src/inventory.rs:64", "equip_item: Stormcaller's Grips already equipped by Kestrel"],
+    ["INFO", "src/lib.rs:88", "client_connected: Halcyon joined Frostmarch"],
+    ["DEBUG", "spacetimedb::subscription", "player: 3 subscribers, 84 rows"],
+    ["INFO", "src/events.rs:52", "tick_world_events: 3 active events, 742 participants"],
+    ["ERROR", "src/market.rs:109", "grant_gold: amount exceeds daily cap for player 16"],
+    ["INFO", "src/lib.rs:88", "client_connected: Peregrine joined Ashenvale"],
+    ["DEBUG", "src/quests.rs:31", "complete_quest(player_id=12, quest_id=2) → +2400 gold"],
+    ["INFO", "spacetimedb::host", "Committed 128 transactions in the last minute"],
+  ].map(([level, source, message], index) => {
+    const [filename, line_number] = source.includes(":") && source.includes(".rs") ? source.split(":") : [undefined, undefined];
+    return JSON.stringify({ level, message, ts: new Date(now - (13 - index) * 47_000).toISOString(), ...(filename ? { filename, line_number: Number(line_number) } : { target: source }) });
+  });
+
+  let localServer: { options: { port: number; inMemory: boolean; allowRemote: boolean }; startedAt: number } | null = null;
+
+  type ShowcaseInternals = {
+    invoke?: (command: string, args?: Record<string, unknown>, options?: unknown) => Promise<unknown>;
+    transformCallback?: (callback: (message: unknown) => void, once?: boolean) => number;
+  };
+  const tauriWindow = window as Window & { __TAURI_INTERNALS__?: ShowcaseInternals };
   const internals = tauriWindow.__TAURI_INTERNALS__ ?? (tauriWindow.__TAURI_INTERNALS__ = {});
+  // Channels (log streaming) register a callback and receive indexed messages.
+  const callbacks = new Map<number, (message: unknown) => void>();
+  let nextCallbackId = 1;
+  internals.transformCallback = (callback) => {
+    const id = nextCallbackId++;
+    callbacks.set(id, callback);
+    return id;
+  };
   internals.invoke = async (command, args = {}, options) => {
       if (["list_connections"].includes(command)) return connections;
+      if (command === "execute_sql") return sqlResult;
+      if (command === "run_function") return null;
+      if (command === "start_log_stream") {
+        const channel = args.onEvent as { id: number };
+        setTimeout(() => callbacks.get(channel.id)?.({ index: 0, message: { kind: "lines", lines: logLines } }), 50);
+        return 1;
+      }
+      if (command === "stop_log_stream") return null;
       if (["test_connection"].includes(command)) return { ok: true, identity: "demo-local", databaseIdentity: "showcase", message: "Connected to the local showcase database" };
       if (["get_schema"].includes(command)) return schema;
       if (["query_table"].includes(command)) {
@@ -140,9 +207,19 @@ if (showcaseEnabled) {
         return { rows: table.rows.slice(start, start + pageSize), columns: table.columns, total: table.name === "player" ? 84 : table.rows.length, hasMore: start + pageSize < (table.name === "player" ? 84 : table.rows.length), page, pageSize };
       }
       if (["export_table"].includes(command)) return JSON.stringify(tables.find((item) => item.name === args.tableName)?.rows ?? []);
-      if (["execute_sql"].includes(command)) return { statements: [] };
       if (["list_cli_config"].includes(command)) return { path: "local showcase", hasToken: false, servers: [] };
-      if (["delete_connection", "save_connection", "create_row", "update_row", "delete_row"].includes(command)) return null;
+      if (["set_active_connection", "delete_connection", "save_connection", "create_row", "update_row", "delete_row"].includes(command)) return null;
+      if (command === "get_local_installations") return { cliPath: "C:\\Users\\demo\\AppData\\Local\\SpacetimeDB\\spacetime.exe", currentVersion: "2.10.1", versions: [{ version: "2.10.1", current: true }, { version: "2.9.0", current: false }, { version: "2.8.2", current: false }], managementError: null };
+      if (command === "get_spacetime_releases") return Number(args.page) === 1 ? [["2.11.0-rc.1", "2026-10-09", true], ["2.10.1", "2026-09-30", false], ["2.10.0", "2026-09-12", false], ["2.9.0", "2026-08-21", false], ["2.8.2", "2026-07-30", false]].map(([version, date, prerelease]) => ({ version, url: "https://github.com/clockworklabs/SpacetimeDB/releases", publishedAt: `${date}T00:00:00Z`, prerelease })) : [];
+      if (command === "start_local_server") localServer = { options: args.options as NonNullable<typeof localServer>["options"], startedAt: Date.now() };
+      if (command === "stop_local_server") localServer = null;
+      if (["get_local_server_status", "start_local_server", "stop_local_server"].includes(command)) {
+        const server = localServer;
+        if (!server) return { state: "stopped", pid: null, options: null, url: null, startedAt: null, exitMessage: null, output: [] };
+        const ready = Date.now() - server.startedAt > 2000;
+        return { state: ready ? "running" : "starting", pid: 48120, options: server.options, url: `http://127.0.0.1:${server.options.port}`, startedAt: server.startedAt, exitMessage: null,
+          output: ["INFO spacetimedb_standalone: Starting SpacetimeDB listening on 127.0.0.1:" + server.options.port, ...(ready ? ["INFO spacetimedb: Database ready"] : [])] };
+      }
       // The update plugin is not available in the browser showcase.
       if (command.toLowerCase().includes("plugin:updater|check")) return null;
       if (command.toLowerCase().includes("plugin:opener|open_url")) return null;
@@ -154,6 +231,11 @@ if (showcaseEnabled) {
   localStorage.setItem("spacetime-studio.theme", "dark");
   localStorage.setItem("spacetime-studio:selected-connection", connectionId);
   localStorage.setItem("spacetime-studio:table-sidebar-width", "188");
+  localStorage.setItem("spacetime-studio:query-tabs", JSON.stringify({ byConnection: { [connectionId]: { tabs: [
+    { name: "Leaderboard", query: "-- Top players by level\nSELECT username, class, level, gold, online\nFROM player\nWHERE level >= 60\nORDER BY level DESC\nLIMIT 12;", pinned: true },
+    { name: "Guild roster", query: "SELECT * FROM guild WHERE realm = 'Moonreach';", pinned: false },
+    { name: "Rare loot", query: "SELECT owner, item_name FROM inventory_item WHERE rarity = 'Legendary';", pinned: false },
+  ], activeIndex: 0 } } }));
   localStorage.setItem("spacetime-studio:table-tabs", JSON.stringify({ byConnection: { [connectionId]: { tabs: ["player", "inventory_item", "guild", "quest", "world_event"], active: "player", pinned: ["player", "guild"] } } }));
 
 }

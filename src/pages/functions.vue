@@ -8,6 +8,7 @@ import {
   type ColumnSummary,
   type FunctionSummary,
   type SchemaSummary,
+  isSwitchedAway,
 } from "../lib/spacetime";
 import { kindBadgeColor, parseArg } from "../lib/cells";
 import {
@@ -55,20 +56,48 @@ const paramForm = ref<Record<string, FunctionParamValue>>({});
 const runResult = ref<unknown>(null);
 const runError = ref("");
 
+// Lifecycle reducers come first, in this order; any other lifecycle kind
+// follows them, then everything else keeps its schema order (sort is stable).
+const LIFECYCLE_ORDER = ["Init", "OnConnect", "OnDisconnect"];
+
+function lifecycleRank(fn: FunctionSummary) {
+  if (!fn.lifecycle) return LIFECYCLE_ORDER.length + 1;
+  const index = LIFECYCLE_ORDER.indexOf(fn.lifecycle);
+  return index === -1 ? LIFECYCLE_ORDER.length : index;
+}
+
 const functions = computed<FunctionSummary[]>(() => {
   const query = filter.value.trim().toLowerCase();
-  const reducers = schema.value?.reducers ?? [];
+  const reducers = [...(schema.value?.reducers ?? [])].sort(
+    (a, b) => lifecycleRank(a) - lifecycleRank(b),
+  );
   if (!query) return reducers;
 
   return reducers.filter((item) => item.name.toLowerCase().includes(query));
 });
 
-// Parameters drops its right border because the pinned Actions column already
-// draws one on its left.
+// Rows open the runner on click, so a stronger hover than the shared default
+// signals that they're clickable.
+const functionsTableUi = {
+  ...dataTableUi,
+  tbody: "divide-y-0 [&>tr]:data-[selectable=true]:hover:bg-elevated",
+};
+
+// Long parameter lists collapse into a "+N" badge so rows stay one line tall.
+const MAX_VISIBLE_PARAMS = 3;
+
+function visibleParams(fn: FunctionSummary) {
+  return fn.params.slice(0, MAX_VISIBLE_PARAMS);
+}
+
+function hiddenParams(fn: FunctionSummary) {
+  return fn.params.slice(MAX_VISIBLE_PARAMS);
+}
+
 const columns: TableColumn<FunctionSummary>[] = [
   {
     id: "name",
-    header: "Function",
+    header: "Reducer",
     meta: {
       class: {
         th: "whitespace-nowrap border-r border-default",
@@ -90,16 +119,6 @@ const columns: TableColumn<FunctionSummary>[] = [
     id: "params",
     header: "Parameters",
     meta: { class: { th: "min-w-80", td: "align-top" } },
-  },
-  {
-    id: "actions",
-    header: "Actions",
-    meta: {
-      class: {
-        th: "w-28 text-right",
-        td: "whitespace-nowrap text-right align-top",
-      },
-    },
   },
 ];
 
@@ -188,6 +207,7 @@ async function load() {
   try {
     schema.value = await getSchema(connectionId.value);
   } catch (err) {
+    if (isSwitchedAway(err)) return;
     error.value = String(err);
   } finally {
     loading.value = false;
@@ -237,12 +257,12 @@ onUnmounted(() => {
       <UInput
         v-model="filter"
         icon="i-lucide-search"
-        placeholder="Filter functions"
-        aria-label="Filter functions"
+        placeholder="Filter reducers"
+        aria-label="Filter reducers"
         class="w-full sm:max-w-md"
       />
       <UBadge color="neutral" variant="subtle"
-        >{{ functions.length }}/{{ schema?.reducers.length ?? 0 }} functions</UBadge
+        >{{ functions.length }}/{{ schema?.reducers.length ?? 0 }} reducers</UBadge
       >
     </div>
 
@@ -257,11 +277,10 @@ onUnmounted(() => {
       :data="functions"
       :columns="columns"
       :get-row-id="getFunctionRowId"
-      :meta="{ class: { tr: 'cursor-pointer transition' } }"
+      :meta="{ class: { tr: 'cursor-pointer transition-colors' } }"
       sticky="header"
-      :column-pinning="{ right: ['actions'] }"
       class="min-h-0 flex-1 rounded-md border border-default bg-default/30"
-      :ui="{ ...dataTableUi, empty: loading ? 'hidden' : dataTableUi.empty }"
+      :ui="{ ...functionsTableUi, empty: loading ? 'hidden' : functionsTableUi.empty }"
       @select="onSelectFunction"
     >
       <template #name-cell="{ row }">
@@ -279,35 +298,33 @@ onUnmounted(() => {
       </template>
 
       <template #params-cell="{ row }">
-        <div v-if="row.original.params.length" class="flex flex-wrap gap-2">
+        <div v-if="row.original.params.length" class="flex items-center gap-2 whitespace-nowrap">
           <UBadge
-            v-for="param in row.original.params"
+            v-for="param in visibleParams(row.original)"
             :key="param.name"
             variant="soft"
             :color="kindBadgeColor(param)"
           >
             {{ param.name }}: {{ param.type }}
           </UBadge>
+          <UBadge
+            v-if="hiddenParams(row.original).length"
+            variant="outline"
+            color="neutral"
+            :title="hiddenParams(row.original).map((p) => `${p.name}: ${p.type}`).join('\n')"
+          >
+            +{{ hiddenParams(row.original).length }}
+          </UBadge>
         </div>
         <span v-else class="text-muted">No parameters</span>
       </template>
 
-      <template #actions-cell="{ row }">
-        <UButton
-          :icon="blockedReason(row.original) ? 'i-lucide-eye' : 'i-lucide-play'"
-          size="xs"
-          variant="ghost"
-          :aria-label="blockedReason(row.original) ? 'View function' : 'Run function'"
-          @click.stop="openRunner(row.original)"
-        />
-      </template>
-
-      <template #empty>No functions found.</template>
+      <template #empty>No reducers found.</template>
     </UTable>
 
     <USlideover
       v-model:open="runnerOpen"
-      :title="blockedReason(selectedFunction) ? 'Function' : 'Run Function'"
+      :title="blockedReason(selectedFunction) ? 'Reducer' : 'Run reducer'"
       :description="selectedFunctionName"
       side="right"
       :ui="{
@@ -355,7 +372,7 @@ onUnmounted(() => {
               v-if="!selectedFunction?.params.length"
               class="rounded-md border border-default bg-default/30 px-3 py-2 text-sm text-muted"
             >
-              This function does not need parameters.
+              This reducer takes no parameters.
             </p>
 
             <UFormField

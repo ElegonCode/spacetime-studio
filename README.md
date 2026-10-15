@@ -8,7 +8,7 @@
 [![Stars](https://img.shields.io/github/stars/ElegonCode/spacetime-studio?style=flat)](https://github.com/ElegonCode/spacetime-studio/stargazers)
 [![License](https://img.shields.io/github/license/ElegonCode/spacetime-studio)](LICENSE)
 
-Spacetime Studio is a desktop admin client for [SpacetimeDB](https://spacetimedb.com/). It gives you a lightweight way to connect to a local or hosted SpacetimeDB instance, inspect schemas, browse and edit table data, run raw SQL, view reducers/functions, and tail database logs.
+Spacetime Studio is a desktop admin client for [SpacetimeDB](https://spacetimedb.com/). It gives you a lightweight way to connect to a local or hosted SpacetimeDB instance, inspect schemas, browse and edit table data, run raw SQL, call reducers, and tail database logs.
 
 Spacetime Studio supports Windows, macOS, and Linux. GitHub Actions builds installers for all three platforms whenever changes are pushed to `main`. Release installers are published on the [GitHub Releases page](https://github.com/ElegonCode/spacetime-studio/releases).
 
@@ -139,10 +139,10 @@ Use the sidebar to move between the available workspace views:
   Tables are grouped into Private and Public sections. Edit a cell inline and press Enter
   (or the save icon) to write it; Esc discards the edit.
 - **SQL** runs any statement against the database. Ctrl+Enter runs the query.
-- **Functions** lists reducers, lifecycle functions, and their parameters.
+- **Reducers** lists the database's reducers, including lifecycle and scheduled ones, and lets you call them with parameters.
 - **Logs** streams database logs as they are written, color-coded by level.
 
-SQL, Functions and Logs are disabled until the active connection is confirmed reachable.
+SQL, Reducers and Logs are disabled until the active connection is confirmed reachable.
 If it can't be reached, the Tables page shows the error with options to retry or edit
 the connection.
 

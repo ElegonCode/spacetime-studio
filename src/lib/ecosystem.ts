@@ -22,6 +22,23 @@ export const getSpacetimeReleases = (page = 1) => invoke<SpacetimeRelease[]>("ge
 export const manageSpacetimeVersion = (action: VersionAction, version?: string) =>
   invoke<VersionActionResult>("manage_spacetime_version", { action, version: version ?? null });
 
+export type LocalServerOptions = { port: number; inMemory: boolean; allowRemote: boolean };
+export type LocalServerState = "stopped" | "starting" | "running" | "external";
+export type LocalServerStatus = {
+  state: LocalServerState;
+  pid: number | null;
+  options: LocalServerOptions | null;
+  url: string | null;
+  startedAt: number | null;
+  exitMessage: string | null;
+  output: string[];
+};
+
+export const getLocalServerStatus = (probePort?: number) =>
+  invoke<LocalServerStatus>("get_local_server_status", { probePort: probePort ?? null });
+export const startLocalServer = (options: LocalServerOptions) => invoke<LocalServerStatus>("start_local_server", { options });
+export const stopLocalServer = () => invoke<LocalServerStatus>("stop_local_server");
+
 export function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }

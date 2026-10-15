@@ -3,6 +3,7 @@ import {
   clearSelectedConnectionId,
   getSelectedConnectionId,
   listConnections,
+  setActiveConnection,
   setSelectedConnectionId,
   testConnection,
   type ConnectionProfile,
@@ -103,7 +104,23 @@ async function pingAll() {
   );
 }
 
-function selectConnection(id: string | null) {
+// Restore the saved selection as the active connection before pages load.
+void setActiveConnection(selectedId.value).catch(() => {});
+
+// Guards against an earlier switch finishing after a newer one.
+let switchToken = 0;
+
+// Disconnects from the current connection before anything uses the next one,
+// so pages reloading for the new selection never race the old connection.
+async function selectConnection(id: string | null) {
+  const token = ++switchToken;
+  try {
+    await setActiveConnection(id);
+  } catch (err) {
+    console.error("Could not switch the active connection", err);
+  }
+  if (token !== switchToken) return;
+
   if (id !== selectedId.value) {
     lastCheckFailed.value = false;
     statusMessage.value = "";

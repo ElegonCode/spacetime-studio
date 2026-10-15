@@ -10,6 +10,7 @@ import {
   type ExportFormat,
   type SqlStatementResult,
   type TableSummary,
+  isSwitchedAway,
 } from "../lib/spacetime";
 import { formatCell } from "../lib/cells";
 import {
@@ -666,6 +667,7 @@ async function run() {
     activeTab.value.ranAt = new Date().toLocaleTimeString();
     remember(sql);
   } catch (err) {
+    if (isSwitchedAway(err)) return;
     toast.add({
       title: "SQL query failed",
       description: String(err),

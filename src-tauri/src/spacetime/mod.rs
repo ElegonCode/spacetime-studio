@@ -15,12 +15,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::HashMap,
+    future::Future,
     sync::{
         atomic::{AtomicU32, Ordering},
         Mutex,
     },
 };
 use tauri::{async_runtime::JoinHandle, ipc::Channel, AppHandle};
+use tokio::sync::watch;
 
 use api::{Api, SqlStatementResult};
 use export::ExportFormat;
@@ -34,11 +36,19 @@ pub use profiles::load_profiles;
 const MAX_BROWSE_ROWS: usize = 10_000;
 const MAX_EXPORT_ROWS: usize = 100_000;
 
+/// Returned by reads that were abandoned because another connection became active.
+const SWITCHED_AWAY: &str = "Disconnected: another connection is now active.";
+
+type ActiveReceiver = watch::Receiver<Option<String>>;
+
 pub struct AppState {
     pub profiles: Mutex<Vec<ConnectionProfile>>,
     http: Client,
     log_streams: Mutex<HashMap<u32, JoinHandle<()>>>,
     next_stream_id: AtomicU32,
+    /// The one connection Studio talks to. Switching it ends everything still
+    /// running for the previous one, and requests to any other are refused.
+    active: watch::Sender<Option<String>>,
 }
 
 impl AppState {
@@ -48,7 +58,52 @@ impl AppState {
             http: api::build_client(),
             log_streams: Mutex::new(HashMap::new()),
             next_stream_id: AtomicU32::new(1),
+            active: watch::channel(None).0,
         }
+    }
+
+    /// Looks up `connection_id` if it is the active connection, claiming it when
+    /// none is active yet. The receiver reports a later switch to another one.
+    fn active_profile(&self, connection_id: &str) -> Result<(ConnectionProfile, ActiveReceiver), String> {
+        let switched = self.active.subscribe();
+        let mut allowed = false;
+        // A first claim is not a switch, so it does not notify receivers.
+        self.active.send_if_modified(|active| {
+            match active {
+                Some(id) => allowed = id == connection_id,
+                None => {
+                    *active = Some(connection_id.to_string());
+                    allowed = true;
+                }
+            }
+            false
+        });
+        if !allowed {
+            return Err("This connection is not active. Switch to it first.".into());
+        }
+        Ok((self.profile(connection_id)?, switched))
+    }
+
+    /// Makes `connection_id` the only connection in use. Returns whether it changed.
+    fn set_active(&self, connection_id: Option<String>) -> Result<bool, String> {
+        let changed = self.active.send_if_modified(|active| {
+            if *active == connection_id {
+                return false;
+            }
+            *active = connection_id.clone();
+            true
+        });
+        if changed {
+            for (_, stream) in self
+                .log_streams
+                .lock()
+                .map_err(|_| "Log stream lock was poisoned".to_string())?
+                .drain()
+            {
+                stream.abort();
+            }
+        }
+        Ok(changed)
     }
 
     fn profile(&self, connection_id: &str) -> Result<ConnectionProfile, String> {
@@ -133,6 +188,18 @@ fn rows_to_objects(columns: &[ColumnSummary], rows: &[Vec<Value>]) -> Vec<Value>
             )
         })
         .collect()
+}
+
+/// Runs a read, abandoning it if another connection becomes active first.
+/// Writes are not wrapped: once sent, the server may already have applied them.
+async fn unless_switched<T>(
+    mut switched: ActiveReceiver,
+    work: impl Future<Output = Result<T, String>>,
+) -> Result<T, String> {
+    tokio::select! {
+        result = work => result,
+        _ = switched.changed() => Err(SWITCHED_AWAY.into()),
+    }
 }
 
 fn first_statement(mut statements: Vec<SqlStatementResult>) -> SqlStatementResult {
@@ -277,6 +344,10 @@ pub fn delete_connection(
         .map_err(|_| "Connection state lock was poisoned".to_string())?;
     profiles.retain(|profile| profile.id != connection_id);
     profiles::persist_profiles(&app, &profiles)?;
+    drop(profiles);
+    if state.active.borrow().as_deref() == Some(connection_id.as_str()) {
+        state.set_active(None)?;
+    }
     profiles::delete_token(&connection_id);
     log::info!("Deleted connection {connection_id}");
     Ok(())
@@ -350,8 +421,8 @@ pub async fn get_schema(
     state: tauri::State<'_, AppState>,
     connection_id: String,
 ) -> Result<SchemaSummary, String> {
-    let profile = state.profile(&connection_id)?;
-    Api::new(&state.http, &profile).schema().await
+    let (profile, switched) = state.active_profile(&connection_id)?;
+    unless_switched(switched, Api::new(&state.http, &profile).schema()).await
 }
 
 #[tauri::command]
@@ -363,7 +434,7 @@ pub async fn query_table(
     page_size: usize,
     where_clause: Option<String>,
 ) -> Result<TablePage, String> {
-    let profile = state.profile(&connection_id)?;
+    let (profile, switched) = state.active_profile(&connection_id)?;
     let api = Api::new(&state.http, &profile);
     let page_size = page_size.clamp(1, 500);
     let where_sql = sql::normalize_where_clause(where_clause.as_deref())?;
@@ -374,7 +445,10 @@ pub async fn query_table(
         fetch_limit + 1
     );
 
-    let (rows, total) = tokio::join!(api.sql(&select), count_rows(&api, &table_name, &where_sql));
+    let (rows, total) = unless_switched(switched, async {
+        Ok(tokio::join!(api.sql(&select), count_rows(&api, &table_name, &where_sql)))
+    })
+    .await?;
     let result = first_statement(rows?);
     let total = total
         .map_err(|error| log::warn!("Row count for '{table_name}' unavailable: {error}"))
@@ -401,13 +475,15 @@ pub async fn execute_sql(
     connection_id: String,
     sql: String,
 ) -> Result<SqlResult, String> {
-    let profile = state.profile(&connection_id)?;
-    if !sql::is_read_only_sql(&sql) {
+    let (profile, switched) = state.active_profile(&connection_id)?;
+    let api = Api::new(&state.http, &profile);
+    let statements = if sql::is_read_only_sql(&sql) {
+        unless_switched(switched, api.sql(&sql)).await?
+    } else {
         profile.ensure_writable()?;
-    }
-    Ok(SqlResult {
-        statements: Api::new(&state.http, &profile).sql(&sql).await?,
-    })
+        api.sql(&sql).await?
+    };
+    Ok(SqlResult { statements })
 }
 
 #[tauri::command]
@@ -417,7 +493,7 @@ pub async fn run_function(
     function_name: String,
     args: Value,
 ) -> Result<Value, String> {
-    let profile = state.profile(&connection_id)?;
+    let (profile, _) = state.active_profile(&connection_id)?;
     profile.ensure_writable()?;
 
     if !args.is_array() {
@@ -436,7 +512,7 @@ pub async fn create_row(
     table_name: String,
     row: Value,
 ) -> Result<(), String> {
-    let profile = state.profile(&connection_id)?;
+    let (profile, _) = state.active_profile(&connection_id)?;
     profile.ensure_writable()?;
     let api = Api::new(&state.http, &profile);
     let table = table_summary(&api, &table_name).await?;
@@ -454,7 +530,7 @@ pub async fn update_row(
     original_row: Value,
     changes: Value,
 ) -> Result<(), String> {
-    let profile = state.profile(&connection_id)?;
+    let (profile, _) = state.active_profile(&connection_id)?;
     profile.ensure_writable()?;
     let api = Api::new(&state.http, &profile);
     let table = table_summary(&api, &table_name).await?;
@@ -482,7 +558,7 @@ pub async fn delete_row(
     table_name: String,
     row: Value,
 ) -> Result<(), String> {
-    let profile = state.profile(&connection_id)?;
+    let (profile, _) = state.active_profile(&connection_id)?;
     profile.ensure_writable()?;
     let api = Api::new(&state.http, &profile);
     let table = table_summary(&api, &table_name).await?;
@@ -507,7 +583,7 @@ pub fn start_log_stream(
     follow: bool,
     on_event: Channel<logs::LogEvent>,
 ) -> Result<u32, String> {
-    let profile = state.profile(&connection_id)?;
+    let (profile, _) = state.active_profile(&connection_id)?;
     let num_lines = num_lines.unwrap_or(200).clamp(1, 10_000);
     let stream_id = state.next_stream_id.fetch_add(1, Ordering::Relaxed);
     let handle = tauri::async_runtime::spawn(logs::stream(
@@ -539,6 +615,19 @@ pub fn stop_log_stream(state: tauri::State<'_, AppState>, stream_id: u32) -> Res
     Ok(())
 }
 
+/// Disconnects from the previous connection (ending its log streams and
+/// pending reads) and makes `connection_id` the only one in use.
+#[tauri::command]
+pub fn set_active_connection(
+    state: tauri::State<'_, AppState>,
+    connection_id: Option<String>,
+) -> Result<(), String> {
+    if state.set_active(connection_id.clone())? {
+        log::info!("Active connection is now {connection_id:?}");
+    }
+    Ok(())
+}
+
 /// Saves rows the webview already holds, such as a SQL console result.
 #[tauri::command]
 pub async fn export_rows(
@@ -563,7 +652,7 @@ pub async fn export_table(
     where_clause: Option<String>,
     format: ExportFormat,
 ) -> Result<Option<String>, String> {
-    let profile = state.profile(&connection_id)?;
+    let (profile, _) = state.active_profile(&connection_id)?;
     let api = Api::new(&state.http, &profile);
     let where_sql = sql::normalize_where_clause(where_clause.as_deref())?;
     let result = first_statement(
@@ -595,5 +684,37 @@ mod tests {
             rows_to_objects(&columns, &rows),
             vec![json!({ "id": 1, "name": "a" }), json!({ "id": 2, "name": null })]
         );
+    }
+
+    fn profile(id: &str) -> ConnectionProfile {
+        ConnectionProfile {
+            id: id.into(),
+            name: id.into(),
+            base_url: "http://127.0.0.1:3000".into(),
+            database: id.into(),
+            identity: None,
+            has_token: false,
+            read_only: false,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn only_the_active_connection_is_usable() {
+        let state = AppState::new(vec![profile("a"), profile("b")]);
+
+        // The first connection used is claimed; others are refused until a switch.
+        let (_, pending_read) = state.active_profile("a").unwrap();
+        assert!(state.active_profile("b").is_err());
+
+        assert!(state.set_active(Some("b".into())).unwrap());
+        assert!(!state.set_active(Some("b".into())).unwrap(), "same connection is not a switch");
+        assert!(state.active_profile("a").is_err());
+        assert!(state.active_profile("b").is_ok());
+
+        // A read still running for the previous connection is abandoned.
+        let result: Result<(), String> = unless_switched(pending_read, std::future::pending()).await;
+        assert_eq!(result.unwrap_err(), SWITCHED_AWAY);
     }
 }

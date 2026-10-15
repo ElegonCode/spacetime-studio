@@ -56,7 +56,7 @@ export async function runVersionOperation(action: VersionAction, version?: strin
     operationOutput.value = result.output;
     operationMessage.value = action === "install" ? `SpacetimeDB ${version} installed.`
       : action === "uninstall" ? `SpacetimeDB ${version} uninstalled.`
-      : `SpacetimeDB ${result.status.currentVersion} is now the active version. Restart your local server to use it.`;
+      : `SpacetimeDB ${result.status.currentVersion} is now the active version. Restart the local server to use it.`;
   } catch (error) {
     operationError.value = errorMessage(error);
     // An updater can change files before reporting failure. Always re-detect.

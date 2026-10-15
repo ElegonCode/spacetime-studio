@@ -14,6 +14,12 @@ use super::sql::js_safe_value;
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const SCHEMA_VERSION: u16 = 9;
 
+/// SpacetimeDB runs the module's `client_connected` and `client_disconnected`
+/// reducers around every SQL and reducer request, so each one briefly counts as
+/// a connected client. Modules that allow one session per identity reject a
+/// second request sent while another is still open, so they go one at a time.
+static CLIENT_REQUESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// One shared client so connections and TLS sessions are reused across calls.
 pub fn build_client() -> Client {
     Client::builder()
@@ -142,7 +148,10 @@ impl<'a> Api<'a> {
             .post(&self.database_path("/sql"))
             .header(reqwest::header::CONTENT_TYPE, "text/plain")
             .body(sql.to_string());
-        let (body, _) = Self::send("SQL request", request).await?;
+        let (body, _) = {
+            let _one_at_a_time = CLIENT_REQUESTS.lock().await;
+            Self::send("SQL request", request).await?
+        };
         let value: Value = serde_json::from_str(&body)
             .map_err(|error| format!("Invalid SQL JSON response: {error}; body: {}", truncate(&body, 300)))?;
         parse_sql_response(&value)
@@ -153,7 +162,10 @@ impl<'a> Api<'a> {
         let request = self
             .post(&self.database_path(&format!("/call/{name}")))
             .json(args);
-        let (body, _) = Self::send("Reducer call", request).await?;
+        let (body, _) = {
+            let _one_at_a_time = CLIENT_REQUESTS.lock().await;
+            Self::send("Reducer call", request).await?
+        };
         if body.trim().is_empty() {
             Ok(Value::Null)
         } else {
@@ -222,6 +234,13 @@ fn describe_transport_error(what: &str, error: &reqwest::Error) -> String {
 pub fn describe_status(what: &str, status: StatusCode, body: &str) -> String {
     let body = truncate(body.trim(), 500);
     match status {
+        // A module's `client_connected` reducer can refuse the request; its
+        // message is the body and has nothing to do with the token.
+        StatusCode::FORBIDDEN if !body.is_empty() => format!(
+            "{what} was refused by the database ({status}): {body}
+
+SpacetimeDB runs the module's client_connected reducer for every request Studio sends, so a module that limits sessions per identity can reject Studio."
+        ),
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => format!(
             "{what} was rejected ({status}). The token on this connection is missing, expired, or lacks access. {body}"
         ),
@@ -252,6 +271,14 @@ mod tests {
         assert_eq!(names, vec!["id", "n"]);
         assert_eq!(parsed[0].rows[1][0], json!("18446744073709551615"));
         assert_eq!(parsed[0].duration_micros, Some(120));
+    }
+
+    #[test]
+    fn module_rejections_are_not_blamed_on_the_token() {
+        let refused = describe_status("SQL request", StatusCode::FORBIDDEN, "Already connected");
+        assert!(refused.contains("Already connected") && !refused.contains("token"));
+        let bare = describe_status("SQL request", StatusCode::FORBIDDEN, "");
+        assert!(bare.contains("token"));
     }
 
     #[test]

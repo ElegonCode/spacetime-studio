@@ -16,6 +16,7 @@ import {
   type SchemaSummary,
   type TablePage,
   type TableSummary,
+  isSwitchedAway,
 } from "../lib/spacetime";
 import { cellToInput, formatCell, isEditable, parseInput } from "../lib/cells";
 import {
@@ -772,6 +773,7 @@ async function loadSchema() {
     if (selectedTableName.value && selectedTableName.value === previous)
       await loadRows();
   } catch (err) {
+    if (isSwitchedAway(err)) return;
     error.value = String(err);
   } finally {
     loadingSchema.value = false;
@@ -794,6 +796,7 @@ async function loadRows(preserveDrafts = false) {
     );
     if (!preserveDrafts) drafts.value = {};
   } catch (err) {
+    if (isSwitchedAway(err)) return;
     error.value = String(err);
   } finally {
     loadingRows.value = false;

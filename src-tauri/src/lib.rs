@@ -1,5 +1,6 @@
-mod spacetime;
 mod ecosystem;
+mod local_server;
+mod spacetime;
 
 use tauri::Manager;
 
@@ -21,6 +22,7 @@ pub fn run() {
             let profiles = spacetime::load_profiles(app.handle());
             app.manage(spacetime::AppState::new(profiles));
             app.manage(ecosystem::InstallationState::default());
+            app.manage(local_server::LocalServerState::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -44,7 +46,16 @@ pub fn run() {
             ecosystem::get_local_installations,
             ecosystem::get_spacetime_releases,
             ecosystem::manage_spacetime_version,
+            spacetime::set_active_connection,
+            local_server::get_local_server_status,
+            local_server::start_local_server,
+            local_server::stop_local_server,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                local_server::shutdown(&app.state::<local_server::LocalServerState>());
+            }
+        });
 }
